@@ -287,6 +287,53 @@ describe('Exporter', function () {
                 assert.strictEqual(asset.nodes.length, 4);
             });
 
+            it('drops the weight of excluded bones by default', function () {
+                let gltfPath = path.resolve(outDirPath, '51_excluded_bone_weights.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+                const bufferCache = {};
+
+                const names = asset.skins[0].joints.map(j => asset.nodes[j].name);
+                assert.deepStrictEqual(names.slice().sort(), ['b0', 'b1', 'neutral_bone', 'twist']);
+                const attrs = asset.meshes[0].primitives[0].attributes;
+                const weights = getAccessorData(gltfPath, asset, attrs.WEIGHTS_0, bufferCache);
+                const joints = getAccessorData(gltfPath, asset, attrs.JOINTS_0, bufferCache);
+                let neutral = 0;
+                for (let v = 0; v < weights.length / 4; v++) {
+                    const w = weights.slice(4 * v, 4 * v + 4);
+                    assert.equalEpsilon(w.reduce((a, b) => a + b, 0), 1.0);
+                    for (let k = 0; k < 4; k++) {
+                        if (w[k] > 0 && names[joints[4 * v + k]] === 'neutral_bone') neutral++;
+                    }
+                }
+                assert.ok(neutral > 0);
+            });
+
+            it('redistributes the weight of excluded bones to the nearest exported parent', function () {
+                let gltfPath = path.resolve(outDirPath, '51_excluded_bone_weights_redistribute.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+                const bufferCache = {};
+
+                assert.strictEqual(asset.nodes.filter(n => n.name === 'neutral_bone').length, 0);
+                const names = asset.skins[0].joints.map(j => asset.nodes[j].name);
+                assert.deepStrictEqual(names.slice().sort(), ['b0', 'b1', 'twist']);
+                const attrs = asset.meshes[0].primitives[0].attributes;
+                const positions = getAccessorData(gltfPath, asset, attrs.POSITION, bufferCache);
+                const weights = getAccessorData(gltfPath, asset, attrs.WEIGHTS_0, bufferCache);
+                const joints = getAccessorData(gltfPath, asset, attrs.JOINTS_0, bufferCache);
+                for (let v = 0; v < weights.length / 4; v++) {
+                    const w = weights.slice(4 * v, 4 * v + 4);
+                    assert.equalEpsilon(w.reduce((a, b) => a + b, 0), 1.0);
+                    if (positions[3 * v + 1] > 1.5) {
+                        // Top ring: helper weight now on b1 (0.5 + 0.3 of 1.0, or all of it)
+                        let b1 = 0;
+                        for (let k = 0; k < 4; k++) {
+                            if (names[joints[4 * v + k]] === 'b1') b1 += w[k];
+                        }
+                        assert.ok(b1 > 0.8 - 1e-6, 'b1 weight ' + b1);
+                    }
+                }
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));
