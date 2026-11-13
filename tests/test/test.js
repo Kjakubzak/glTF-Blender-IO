@@ -314,6 +314,16 @@ describe('Exporter', function () {
                 assert.ok(!asset.extensionsUsed.includes('EXT_test_not_allowed'));
             });
 
+            it('writes the KHR_character marker', function () {
+                let gltfPath = path.resolve(outDirPath, '52_khr_marker.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                assert.deepStrictEqual(asset.extensions['KHR_character'], {});
+                assert.ok(asset.extensionsUsed.includes('KHR_character'));
+                assert.ok(!(asset.extensionsRequired || []).includes('KHR_character'));
+                assert.match(asset.asset.generator, /^Khronos glTF Blender I\/O v[0-9.]+\+khr_character\.[0-9a-f]{12}\.bl[0-9.]+$/);
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));
