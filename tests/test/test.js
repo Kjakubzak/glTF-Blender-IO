@@ -239,6 +239,22 @@ describe('General', function () {
     });
 });
 
+describe('KHR_character', function () {
+    blenderVersions.forEach(function (blenderVersion) {
+        it(blenderVersion + ' unit tests', function (done) {
+            const { exec } = require('child_process');
+            const cmd = `${blenderVersion} -b --addons io_scene_gltf2 -noaudio --python khr_character/run_tests.py`;
+            exec(cmd, (error, stdout, stderr) => {
+                if (error) {
+                    done(new Error(stdout.slice(-4000) + stderr.slice(-4000)));
+                    return;
+                }
+                done();
+            });
+        });
+    });
+});
+
 describe('Exporter', function () {
     let blenderSampleScenes = fs.readdirSync('scenes').filter(f => f.endsWith('.blend')).map(f => f.substring(0, f.length - 6));
 

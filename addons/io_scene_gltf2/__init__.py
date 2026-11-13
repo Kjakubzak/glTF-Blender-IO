@@ -1073,6 +1073,21 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
         options={'HIDDEN'},
     )
 
+    export_khr_character: BoolProperty(
+        name='KHR_character',
+        description=(
+            'Export the KHR_character extension family (draft) from the character data of the scene, '
+            'armatures, actions, objects and materials'
+        ),
+        default=False
+    )
+
+    export_khr_strict: BoolProperty(
+        name='Strict Validation',
+        description='Abort the export when a KHR_character validation rule fails (otherwise only log it)',
+        default=True
+    )
+
     export_loglevel: IntProperty(
         name='Log Level',
         description="Log Level",
@@ -1353,6 +1368,9 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
         export_settings['gltf_allowed_empty_extensions'] = [
             name.strip() for name in self.export_allowed_empty_extensions.split(',') if name.strip()]
 
+        export_settings['gltf_khr_character'] = self.export_khr_character
+        export_settings['gltf_khr_strict'] = self.export_khr_strict
+
         # gltfpack stuff
         export_settings['gltf_use_gltfpack'] = self.export_use_gltfpack
         if self.export_use_gltfpack:
@@ -1404,6 +1422,9 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
                 pre_export_callbacks.append(module.glTF2_pre_export_callback)
             if hasattr(module, 'glTF2_post_export_callback'):
                 post_export_callbacks.append(module.glTF2_post_export_callback)
+        if self.export_khr_character:
+            from .blender.exp.khr_character import KhrCharacterExportExtension
+            user_extensions.append(KhrCharacterExportExtension())
         export_settings['gltf_user_extensions'] = user_extensions
         export_settings['pre_export_callbacks'] = pre_export_callbacks
         export_settings['post_export_callbacks'] = post_export_callbacks
@@ -2303,9 +2324,13 @@ classes = (
 
 def register():
     from .blender.com import gltf2_blender_ui as blender_ui
+    from .blender.com.khr_character import props as khr_character_props
+    from .blender.exp.khr_character import ui as khr_character_ui
 
     for c in classes:
         bpy.utils.register_class(c)
+    khr_character_props.register()
+    exporter_extension_layout_draw['KHR_character'] = khr_character_ui.draw_export_panel
     # bpy.utils.register_module(__name__)
 
     blender_ui.register()
@@ -2326,6 +2351,10 @@ def unregister():
         blender_ui.variant_unregister()
     if bpy.context.preferences.addons['io_scene_gltf2'].preferences.animation_ui is True:
         blender_ui.anim_ui_unregister()
+
+    from .blender.com.khr_character import props as khr_character_props
+    exporter_extension_layout_draw.pop('KHR_character', None)
+    khr_character_props.unregister()
 
     for c in classes:
         bpy.utils.unregister_class(c)
