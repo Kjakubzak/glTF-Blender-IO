@@ -133,7 +133,8 @@ class KhrCharacterExportExtension:
         self._run('node', node, blender_object)
 
     def gather_joint_hook(self, node, blender_bone, export_settings):
-        self.ctx.bone_nodes[(blender_bone.id_data.name, blender_bone.name)] = node
+        if node.name == blender_bone.name:  # not a '_leaf' node
+            self.ctx.bone_nodes[(blender_bone.id_data.name, blender_bone.name)] = node
         self._run('joint', node, blender_bone)
 
     def gather_tree_filter_tag_hook(self, vtree, export_settings):

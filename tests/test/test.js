@@ -324,6 +324,28 @@ describe('Exporter', function () {
                 assert.match(asset.asset.generator, /^Khronos glTF Blender I\/O v[0-9.]+\+khr_character\.[0-9a-f]{12}\.bl[0-9.]+$/);
             });
 
+            it('maps vrm1_humanoid roles for four skeleton conventions', function () {
+                const expected = {
+                    rigify: { hips: 'DEF-spine', spine: 'DEF-spine.001', head: 'DEF-spine.006', leftUpperArm: 'DEF-upper_arm.L', rightHand: 'DEF-hand.R', leftLowerLeg: 'DEF-shin.L', leftIndexDistal: 'DEF-f_index.03.L' },
+                    mixamo: { hips: 'mixamorig:Hips', upperChest: 'mixamorig:Spine2', head: 'mixamorig:Head', leftUpperArm: 'mixamorig:LeftArm', rightLowerLeg: 'mixamorig:RightLeg', leftLittleDistal: 'mixamorig:LeftHandPinky3' },
+                    maya_jnt: { hips: 'Hips_jnt', chest: 'Spine2_jnt', leftShoulder: 'L_Clavicle_jnt', leftLowerArm: 'L_Elbow_jnt', rightFoot: 'R_Ankle_jnt' },
+                    cartoon3finger: { hips: 'pelvis', chest: 'chest', leftUpperArm: 'arm_upper.l', rightThumbDistal: 'thumb_02.r', leftMiddleProximal: 'middle_01.l' },
+                };
+                const required = ['hips', 'spine', 'head', 'leftUpperLeg', 'leftLowerLeg', 'leftFoot', 'rightUpperLeg', 'rightLowerLeg', 'rightFoot',
+                    'leftUpperArm', 'leftLowerArm', 'leftHand', 'rightUpperArm', 'rightLowerArm', 'rightHand'];
+                for (const rig of Object.keys(expected)) {
+                    let gltfPath = path.resolve(outDirPath, '53_skelmap_' + rig + '.gltf');
+                    const asset = JSON.parse(fs.readFileSync(gltfPath));
+                    assert.ok(asset.extensionsUsed.includes('KHR_character_skeleton_mapping'));
+                    assert.ok(asset.extensionsUsed.includes('KHR_character'));
+                    const roles = asset.extensions.KHR_character_skeleton_mapping.skeletalRigMappings.vrm1_humanoid;
+                    for (const r of required) assert.ok(roles[r] !== undefined, rig + ' ' + r);
+                    const nodes = Object.values(roles).map(a => a.node);
+                    assert.strictEqual(new Set(nodes).size, nodes.length, rig + ' unique nodes');
+                    for (const [r, n] of Object.entries(expected[rig])) assert.strictEqual(asset.nodes[roles[r].node].name, n, rig + ' ' + r);
+                }
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));

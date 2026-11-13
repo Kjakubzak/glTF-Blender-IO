@@ -17,9 +17,10 @@
 # mesh(ctx, mesh, blender_mesh, obj, materials), gltf(ctx, scenes, animations), root(ctx, gltf)
 # and validate(ctx, gltf).
 
-from . import checks, marker
+from . import checks, marker, skeleton_mapping
 
 FEATURES = [
     marker,
+    skeleton_mapping,
     checks,
 ]

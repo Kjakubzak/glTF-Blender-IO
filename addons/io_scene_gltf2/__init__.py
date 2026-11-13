@@ -2330,6 +2330,7 @@ def register():
     for c in classes:
         bpy.utils.register_class(c)
     khr_character_props.register()
+    khr_character_ui.register()
     exporter_extension_layout_draw['KHR_character'] = khr_character_ui.draw_export_panel
     # bpy.utils.register_module(__name__)
 
@@ -2353,7 +2354,9 @@ def unregister():
         blender_ui.anim_ui_unregister()
 
     from .blender.com.khr_character import props as khr_character_props
+    from .blender.exp.khr_character import ui as khr_character_ui
     exporter_extension_layout_draw.pop('KHR_character', None)
+    khr_character_ui.unregister()
     khr_character_props.unregister()
 
     for c in classes:
