@@ -32,9 +32,15 @@ try:
     output_dir = os.path.join(path_parts[0], argv[0])
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    settings = dict(bpy.context.scene.get('glTF2ExportSettings', {}))
+    if settings.get('export_allowed_empty_extensions'):
+        # Test-only user extension, see gltf_test_user_extension.py
+        import addon_utils
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        addon_utils.enable('gltf_test_user_extension', default_set=True)
     args = {
         # Settings from "Remember Export Settings"
-        **dict(bpy.context.scene.get('glTF2ExportSettings', {})),
+        **settings,
 
         'export_format': ('GLB' if extension == '.glb' else 'GLTF_SEPARATE'),
         'filepath': os.path.join(output_dir, path_parts[1]),

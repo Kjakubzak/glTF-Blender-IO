@@ -528,7 +528,7 @@ def __fix_json(obj, export_settings, passthrough_extensions=[]):
 
 
 def __should_include_json_value(key, value, export_settings):
-    allowed_empty_collections = ["KHR_materials_unlit"]
+    allowed_empty_collections = ["KHR_materials_unlit"] + export_settings.get('gltf_allowed_empty_extensions', [])
     allowed_empty_collections_if_animated = \
         [
             "KHR_materials_specular",
