@@ -88,3 +88,54 @@ class Glb:
             if a.get('name') == name:
                 return a
         raise KeyError(name)
+
+
+def quat_matrix(q):
+    x, y, z, w = q
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def pose_values(g, animation):
+    """{(node, path): first output value} of an animation."""
+    out = {}
+    for ch in animation['channels']:
+        s = animation['samplers'][ch['sampler']]
+        out[(ch['target']['node'], ch['target']['path'])] = g.accessor(s['output'])[0]
+    return out
+
+
+def world_positions(g, animation=None):
+    """Global translation of every node, with an animation's first key applied (reference pose)."""
+    pose = pose_values(g, animation) if animation else {}
+    nodes = g.json['nodes']
+    parent = {}
+    for i, n in enumerate(nodes):
+        for c in n.get('children', []):
+            parent[c] = i
+    local = []
+    for i, n in enumerate(nodes):
+        if 'matrix' in n:
+            local.append(np.array(n['matrix'], dtype=float).reshape(4, 4).T)
+            continue
+        t = pose.get((i, 'translation'), n.get('translation', [0, 0, 0]))
+        r = pose.get((i, 'rotation'), n.get('rotation', [0, 0, 0, 1]))
+        s = pose.get((i, 'scale'), n.get('scale', [1, 1, 1]))
+        m = np.eye(4)
+        m[:3, :3] = quat_matrix(r) @ np.diag(s)
+        m[:3, 3] = t
+        local.append(m)
+    world = {}
+
+    def get(i):
+        if i not in world:
+            world[i] = (get(parent[i]) if i in parent else np.eye(4)) @ local[i]
+        return world[i]
+    return {nodes[i].get('name'): get(i)[:3, 3] for i in range(len(nodes))}
+
+
+def angle_deg(a, b):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    c = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+    return float(np.degrees(np.arccos(max(-1.0, min(1.0, c)))))

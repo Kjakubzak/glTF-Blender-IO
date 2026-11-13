@@ -68,6 +68,67 @@ class KHR_OT_auto_map_skeleton(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def humanoid_mapping(ob):
+    for s in ob.khr_skeleton_mapping.sets:
+        if s.set_id == 'vrm1_humanoid':
+            return {e.role: e.bone for e in s.entries if e.bone in ob.pose.bones}
+    return {}
+
+
+class KHR_OT_make_t_pose(bpy.types.Operator):
+    """Create a one-frame t_pose reference-pose action from the rest pose (limb_dir convention)"""
+    bl_idname = 'khr_character.make_t_pose'
+    bl_label = 'Make T-Pose'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    action_name: bpy.props.StringProperty(name='Action', default='t_pose')
+    include_thumb: bpy.props.BoolProperty(name='Thumb', default=True)
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and context.active_object.type == 'ARMATURE'
+
+    def execute(self, context):
+        from .tpose import make_t_pose
+        ob = context.active_object
+        mapping = humanoid_mapping(ob)
+        missing = [r for r in ('leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm') if r not in mapping]
+        if missing:
+            self.report({'ERROR'}, 'vrm1_humanoid mapping lacks ' + ', '.join(missing))
+            return {'CANCELLED'}
+        mode = ob.mode
+        if mode != 'POSE':
+            bpy.ops.object.mode_set(mode='POSE')
+        action = make_t_pose(ob, mapping, self.action_name, include_thumb=self.include_thumb)
+        if mode != 'POSE':
+            bpy.ops.object.mode_set(mode=mode)
+        self.report({'INFO'}, 'Created reference pose action ' + action.name)
+        return {'FINISHED'}
+
+
+class KHR_OT_capture_reference_pose(bpy.types.Operator):
+    """Key the current (or rest) pose of the armature as a one-frame reference-pose action"""
+    bl_idname = 'khr_character.capture_reference_pose'
+    bl_label = 'Capture Reference Pose'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    pose_type: bpy.props.EnumProperty(name='Pose Type', items=(
+        ('t_pose', 'T-Pose', ''), ('a_pose', 'A-Pose', ''), ('i_pose', 'I-Pose', '')), default='a_pose')
+    from_rest: bpy.props.BoolProperty(name='From Rest Pose', default=True)
+    action_name: bpy.props.StringProperty(name='Action', default='')
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and context.active_object.type == 'ARMATURE'
+
+    def execute(self, context):
+        from .tpose import key_reference_pose
+        ob = context.active_object
+        action = key_reference_pose(ob, self.action_name or self.pose_type, self.pose_type, self.from_rest)
+        self.report({'INFO'}, 'Created reference pose action ' + action.name)
+        return {'FINISHED'}
+
+
 class KHR_PT_skeleton_mapping(bpy.types.Panel):
     bl_label = 'KHR_character Skeleton Mapping'
     bl_space_type = 'PROPERTIES'
@@ -83,6 +144,9 @@ class KHR_PT_skeleton_mapping(bpy.types.Panel):
         ob = context.object
         layout = self.layout
         layout.operator(KHR_OT_auto_map_skeleton.bl_idname)
+        row = layout.row(align=True)
+        row.operator(KHR_OT_make_t_pose.bl_idname)
+        row.operator(KHR_OT_capture_reference_pose.bl_idname)
         for mapping_set in ob.khr_skeleton_mapping.sets:
             box = layout.box()
             box.prop(mapping_set, 'set_id')
@@ -94,6 +158,8 @@ class KHR_PT_skeleton_mapping(bpy.types.Panel):
 
 classes = (
     KHR_OT_auto_map_skeleton,
+    KHR_OT_make_t_pose,
+    KHR_OT_capture_reference_pose,
     KHR_PT_skeleton_mapping,
 )
 

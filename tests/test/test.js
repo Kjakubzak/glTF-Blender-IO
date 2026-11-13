@@ -346,6 +346,79 @@ describe('Exporter', function () {
                 }
             });
 
+            it('exports t_pose and a_pose reference poses last', function () {
+                let gltfPath = path.resolve(outDirPath, '54_refpose.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+                const bufferCache = {};
+                assert.ok(asset.extensionsUsed.includes('KHR_character_reference_pose'));
+                assert.ok(!(asset.extensionsRequired || []).includes('KHR_character_reference_pose'));
+                assert.deepStrictEqual(asset.animations.map(a => a.name), ['clip', 't_pose', 'a_pose']);
+                assert.strictEqual(asset.animations[0].extensions, undefined);
+
+                const nodeIndex = name => asset.nodes.findIndex(n => n.name === name);
+                const parent = {};
+                asset.nodes.forEach((n, i) => (n.children || []).forEach(c => { parent[c] = i; }));
+                const mul = (a, b) => {
+                    const r = new Array(16).fill(0);
+                    for (let c = 0; c < 4; c++) for (let rr = 0; rr < 4; rr++) for (let k = 0; k < 4; k++) r[c * 4 + rr] += a[k * 4 + rr] * b[c * 4 + k];
+                    return r;
+                };
+                const trs = (t, q, s) => {
+                    const [x, y, z, w] = q;
+                    return [
+                        (1 - 2 * (y * y + z * z)) * s[0], 2 * (x * y + z * w) * s[0], 2 * (x * z - y * w) * s[0], 0,
+                        2 * (x * y - z * w) * s[1], (1 - 2 * (x * x + z * z)) * s[1], 2 * (y * z + x * w) * s[1], 0,
+                        2 * (x * z + y * w) * s[2], 2 * (y * z - x * w) * s[2], (1 - 2 * (x * x + y * y)) * s[2], 0,
+                        t[0], t[1], t[2], 1];
+                };
+                const worldPositions = animation => {
+                    const local = asset.nodes.map(n => ({ translation: n.translation || [0, 0, 0], rotation: n.rotation || [0, 0, 0, 1], scale: n.scale || [1, 1, 1] }));
+                    if (animation) {
+                        for (const ch of animation.channels) {
+                            const sampler = animation.samplers[ch.sampler];
+                            assert.strictEqual(asset.accessors[sampler.input].count, 1);
+                            assert.ok(['translation', 'rotation', 'scale'].includes(ch.target.path));
+                            const value = getAccessorData(gltfPath, asset, sampler.output, bufferCache);
+                            if (ch.target.path === 'rotation') assert.ok(Math.abs(Math.hypot(...value) - 1) < 1e-5);
+                            local[ch.target.node][ch.target.path] = value;
+                        }
+                    }
+                    const world = {};
+                    const get = i => {
+                        if (world[i] === undefined) {
+                            const m = trs(local[i].translation, local[i].rotation, local[i].scale);
+                            world[i] = parent[i] === undefined ? m : mul(get(parent[i]), m);
+                        }
+                        return world[i];
+                    };
+                    return name => { const m = get(nodeIndex(name)); return [m[12], m[13], m[14]]; };
+                };
+                const angle = (p, q, want) => {
+                    const d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+                    const c = (d[0] * want[0] + d[1] * want[1] + d[2] * want[2]) / (Math.hypot(...d) * Math.hypot(...want));
+                    return Math.acos(Math.min(1, Math.max(-1, c))) * 180 / Math.PI;
+                };
+                const m = 'mixamorig:';
+                const tPose = asset.animations[1];
+                const aPose = asset.animations[2];
+                assert.deepStrictEqual(tPose.extensions.KHR_character_reference_pose, { poseType: 't_pose' });
+                assert.deepStrictEqual(aPose.extensions.KHR_character_reference_pose, { poseType: 'a_pose' });
+                const t = worldPositions(tPose);
+                for (const [side, x] of [['Left', 1], ['Right', -1]]) {
+                    assert.ok(angle(t(m + side + 'Arm'), t(m + side + 'ForeArm'), [x, 0, 0]) < 2, side + ' upper arm');
+                    assert.ok(angle(t(m + side + 'ForeArm'), t(m + side + 'Hand'), [x, 0, 0]) < 2, side + ' lower arm');
+                    assert.ok(angle(t(m + side + 'HandIndex1'), t(m + side + 'HandIndex2'), [x, 0, 0]) < 3, side + ' index');
+                    assert.ok(angle(t(m + side + 'HandThumb2'), t(m + side + 'HandThumb3'), [x, 0, 1]) < 3, side + ' thumb');
+                    assert.ok(angle(t(m + side + 'UpLeg'), t(m + side + 'Leg'), [0, -1, 0]) < 2, side + ' upper leg');
+                }
+                const a = worldPositions(aPose);
+                const rest = worldPositions(null);
+                for (const name of ['Arm', 'ForeArm', 'Hand', 'HandIndex2']) {
+                    const p = a(m + 'Left' + name), q = rest(m + 'Left' + name);
+                    assert.ok(Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-5, name);
+                }
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));
