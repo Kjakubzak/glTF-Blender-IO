@@ -104,23 +104,24 @@ def get_material_cache_key(blender_material, export_settings):
 
 
 @cached_by_key(key=get_material_cache_key)
-def gather_material(bmat, export_settings):
+def gather_material(mat, export_settings):
     """
     Gather the material used by the blender primitive.
 
-    :param blender_material: the blender material used in the glTF primitive
+    :param mat: the blender material used in the glTF primitive
     :param export_settings:
-    :return: a glTF material
+    :return: a glTF material and some info about UV maps, vertex colors, and UDIMs
     """
+    # Also: Make sure to return bmat, so temporary inline material node tree will continue to exist
 
-    bmat = BlenderMaterialIndentifier(bmat, export_settings)
+    bmat = BlenderMaterialIndentifier(mat, export_settings)
 
     if not __filter_material(bmat, export_settings):
-        return None, {"uv_info": {}, "vc_info": {'color': None, 'alpha': None,
-                                                 'color_type': None, 'alpha_type': None, 'alpha_mode': "OPAQUE"}, "udim_info": {}}
+        return bmat, None, {"uv_info": {}, "vc_info": {'color': None, 'alpha': None,
+                                                       'color_type': None, 'alpha_type': None, 'alpha_mode': "OPAQUE"}, "udim_info": {}}
 
     if export_settings['gltf_materials'] == "VIEWPORT":
-        return export_viewport_material(bmat.material, export_settings), {"uv_info": {}, "vc_info": {
+        return bmat, export_viewport_material(bmat.material, export_settings), {"uv_info": {}, "vc_info": {
             'color': None, 'alpha': None, 'color_type': None, 'alpha_type': None, 'alpha_mode': "OPAQUE"}, "udim_info": {}}
 
     nodes_used = export_settings['nodes_used'] = {}
@@ -130,8 +131,10 @@ def gather_material(bmat, export_settings):
 
     mat_unlit, uvmap_info, vc_info, udim_info = __export_unlit(bmat, export_settings)
     if mat_unlit is not None:
-        export_user_extensions('gather_material_hook', export_settings, mat_unlit, bmat)
-        return mat_unlit, {"uv_info": uvmap_info, "vc_info": vc_info, "udim_info": udim_info}
+        # Make sure to expose bmat.material (the original material), so users can retrieve additional proporties
+        # (These properties are not available on the inline material)
+        export_user_extensions('gather_material_hook', export_settings, mat_unlit, bmat.material)
+        return bmat, mat_unlit, {"uv_info": uvmap_info, "vc_info": vc_info, "udim_info": udim_info}
 
     orm_texture = __gather_orm_texture(bmat, export_settings)
 
@@ -218,7 +221,9 @@ def gather_material(bmat, export_settings):
             "Base Color").socket is None:
         material.pbr_metallic_roughness = gltf2_pbr_metallic_roughness.get_default_pbr_for_emissive_node()
 
-    export_user_extensions('gather_material_hook', export_settings, material, bmat.get_used_material())
+    # Make sure to expose bmat.material (the original material), so users can retrieve additional proporties
+        # (These properties are not available on the inline material)
+    export_user_extensions('gather_material_hook', export_settings, material, bmat.material)
 
     # Now we have exported the material itself, we need to store some additional data
     # This will be used when trying to export some KHR_animation_pointer
@@ -229,7 +234,7 @@ def gather_material(bmat, export_settings):
 
     export_settings['current_paths'] = {}
 
-    return material, {"uv_info": uvmap_infos, "vc_info": vc_info, "udim_info": udim_infos}
+    return bmat, material, {"uv_info": uvmap_infos, "vc_info": vc_info, "udim_info": udim_infos}
 
 
 def get_new_material_texture_shared(base, node):
@@ -592,7 +597,9 @@ def __export_unlit(bmat, export_settings):
         )
     )
 
-    export_user_extensions('gather_material_unlit_hook', export_settings, material, bmat.get_used_material())
+    # Make sure to expose bmat.material (the original material), so users can retrieve additional proporties
+    # (These properties are not available on the inline material)
+    export_user_extensions('gather_material_unlit_hook', export_settings, material, bmat.material)
 
     # Now we have exported the material itself, we need to store some additional data
     # This will be used when trying to export some KHR_animation_pointer
@@ -758,6 +765,7 @@ def get_material_from_idx(material_idx, materials, export_settings):
 
 def get_base_material(material_idx, materials, export_settings):
 
+    bmat = None
     export_settings['current_paths'] = {}
 
     material = None
@@ -775,7 +783,7 @@ def get_base_material(material_idx, materials, export_settings):
 
     mat = get_material_from_idx(material_idx, materials, export_settings)
     if mat is not None:
-        material, material_info = gather_material(
+        bmat, material, material_info = gather_material(
             mat,
             export_settings
         )
@@ -788,7 +796,7 @@ def get_base_material(material_idx, materials, export_settings):
             # VC will have alpha, as there is no material to know if alpha is used or not
             material_info["vc_info"]["alpha_mode"] = "BLEND"
 
-    return material, material_info
+    return bmat, material, material_info
 
 
 def get_all_textures(idx=0):
