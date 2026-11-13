@@ -287,6 +287,17 @@ describe('Exporter', function () {
                 assert.strictEqual(asset.nodes.length, 4);
             });
 
+            it('keeps allowed empty extensions', function () {
+                let gltfPath = path.resolve(outDirPath, '50_empty_extension_hook.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                assert.deepStrictEqual(asset.extensions['KHR_character'], {});
+                assert.ok(asset.extensionsUsed.includes('KHR_character'));
+                assert.ok(!(asset.extensionsRequired || []).includes('KHR_character'));
+                assert.strictEqual(asset.extensions['EXT_test_not_allowed'], undefined);
+                assert.ok(!asset.extensionsUsed.includes('EXT_test_not_allowed'));
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));

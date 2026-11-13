@@ -1062,6 +1062,17 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
         default=False
     )
 
+    export_allowed_empty_extensions: StringProperty(
+        name='Allowed Empty Extensions',
+        description=(
+            'Comma-separated extension names whose empty object ({}) is kept in the output '
+            'and declared in extensionsUsed. User extensions can also append to '
+            "export_settings['gltf_allowed_empty_extensions'] in pre_export_hook"
+        ),
+        default='',
+        options={'HIDDEN'},
+    )
+
     export_loglevel: IntProperty(
         name='Log Level',
         description="Log Level",
@@ -1338,6 +1349,9 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
             export_settings['gltf_try_omit_sparse_sk'] = False
 
         export_settings['gltf_hierarchy_full_collections'] = self.export_hierarchy_full_collections
+
+        export_settings['gltf_allowed_empty_extensions'] = [
+            name.strip() for name in self.export_allowed_empty_extensions.split(',') if name.strip()]
 
         # gltfpack stuff
         export_settings['gltf_use_gltfpack'] = self.export_use_gltfpack
