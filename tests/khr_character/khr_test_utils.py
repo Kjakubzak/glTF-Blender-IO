@@ -139,3 +139,18 @@ def angle_deg(a, b):
     a, b = np.asarray(a, float), np.asarray(b, float)
     c = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
     return float(np.degrees(np.arccos(max(-1.0, min(1.0, c)))))
+
+
+def shape_key_mesh(name, keys, location=(0.0, 0.0, 0.0)):
+    """A one-quad mesh object with a Basis and one shape key per name (each moves one vertex)."""
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([(-0.1, 0, -0.1), (0.1, 0, -0.1), (0.1, 0, 0.1), (-0.1, 0, 0.1)], [], [(0, 1, 2, 3)])
+    ob = bpy.data.objects.new(name, me)
+    ob.location = location
+    bpy.context.scene.collection.objects.link(ob)
+    ob.shape_key_add(name='Basis')
+    for i, key in enumerate(keys):
+        k = ob.shape_key_add(name=key)
+        k.data[i % 4].co.y += 0.01 * (i + 1)
+        k.value = 0.0
+    return ob
