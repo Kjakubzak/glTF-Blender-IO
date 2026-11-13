@@ -946,6 +946,17 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
         default=False
     )
 
+    export_redistribute_excluded_weights: BoolProperty(
+        name='Redistribute Excluded Weights',
+        description=(
+            'Give the skin weight of bones that are not exported (for example non-deforming bones '
+            'when exporting deforming bones only) to their nearest exported parent bone, '
+            'instead of dropping it. This differs from the Armature modifier, '
+            'which ignores non-deforming bones'
+        ),
+        default=False
+    )
+
     export_morph: BoolProperty(
         name='Shape Keys',
         description='Export shape keys (morph targets)',
@@ -1311,8 +1322,10 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
         if self.export_skins:
             export_settings['gltf_all_vertex_influences'] = self.export_all_influences
             export_settings['gltf_vertex_influences_nb'] = self.export_influence_nb
+            export_settings['gltf_redistribute_excluded_weights'] = self.export_redistribute_excluded_weights
         else:
             export_settings['gltf_all_vertex_influences'] = False
+            export_settings['gltf_redistribute_excluded_weights'] = False
             export_settings['gltf_def_bones'] = False
         export_settings['gltf_rest_position_armature'] = self.export_rest_position_armature
         export_settings['gltf_frame_step'] = self.export_frame_step
@@ -1664,6 +1677,7 @@ def export_panel_data_skinning(layout, operator):
         row.prop(operator, 'export_influence_nb')
         row.active = not operator.export_all_influences
         body.prop(operator, 'export_all_influences')
+        body.prop(operator, 'export_redistribute_excluded_weights')
 
 
 def export_panel_data_lighting(layout, operator):

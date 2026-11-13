@@ -1579,12 +1579,21 @@ class PrimitiveCreator:
         joint_name_to_index = {joint.name: index for index, joint in enumerate(self.skin.joints)}
         group_to_joint = [joint_name_to_index.get(g.name) for g in self.blender_vertex_groups]
 
+        # Groups named after a bone that is not exported: group index -> nearest exported parent joint (or None)
+        excluded_groups = self.__get_excluded_bone_groups(group_to_joint, joint_name_to_index)
+        redistribute = self.export_settings.get('gltf_redistribute_excluded_weights', False)
+        excluded_vertices = 0
+        fully_excluded_vertices = 0
+        max_excluded_share = 0.0
+
         # List of (joint, weight) pairs for each vert
         self.vert_bones = []
         max_num_influences = 0
 
         for vertex in self.blender_mesh.vertices:
             bones = []
+            excluded_weight = 0.0
+            kept_weight = 0.0
             if vertex.groups:
                 for group_element in vertex.groups:
                     weight = group_element.weight
@@ -1595,8 +1604,24 @@ class PrimitiveCreator:
                     except Exception:
                         continue
                     if joint is None:
+                        if group_element.group in excluded_groups:
+                            excluded_weight += weight
+                            target = excluded_groups[group_element.group]
+                            if redistribute and target is not None:
+                                bones.append((target, weight))
                         continue
+                    kept_weight += weight
                     bones.append((joint, weight))
+            if excluded_weight > 0.0:
+                excluded_vertices += 1
+                max_excluded_share = max(max_excluded_share, excluded_weight / (excluded_weight + kept_weight))
+                if kept_weight == 0.0:
+                    fully_excluded_vertices += 1
+                if redistribute:
+                    merged = {}
+                    for joint, weight in bones:
+                        merged[joint] = merged.get(joint, 0.0) + weight
+                    bones = list(merged.items())
             bones.sort(key=lambda x: x[1], reverse=True)
             if not bones:
                 # Is not assign to any bone
@@ -1608,6 +1633,42 @@ class PrimitiveCreator:
 
         # How many joint sets do we need? 1 set = 4 influences
         self.num_joint_sets = (max_num_influences + 3) // 4
+
+        if excluded_vertices:
+            self.export_settings.setdefault('gltf_excluded_bone_weights', {})[self.blender_mesh.name] = {
+                'vertices': excluded_vertices,
+                'fully_excluded_vertices': fully_excluded_vertices,
+                'max_share': max_excluded_share,
+                'redistributed': redistribute,
+            }
+            if max_excluded_share > 1e-3:
+                self.export_settings['log'].warning(
+                    "Mesh '{}': {} vertices have skin weight on bones that are not exported "
+                    "(largest share {:.4f}, {} vertices with no other weight). {}".format(
+                        self.blender_mesh.name, excluded_vertices, max_excluded_share, fully_excluded_vertices,
+                        "This weight was given to the nearest exported parent bones." if redistribute else
+                        "This weight is dropped; see 'Redistribute Excluded Weights'."))
+
+    def __get_excluded_bone_groups(self, group_to_joint, joint_name_to_index):
+        excluded = {}
+        if self.armature is None or self.armature.type != 'ARMATURE':
+            return excluded
+        bones = self.armature.data.bones
+        for group_index, (group, joint) in enumerate(zip(self.blender_vertex_groups, group_to_joint)):
+            if joint is not None:
+                continue
+            bone = bones.get(group.name)
+            if bone is None:
+                continue  # Not a bone group: never a skin weight
+            target = None
+            parent = bone.parent
+            while parent is not None:
+                if parent.name in joint_name_to_index:
+                    target = joint_name_to_index[parent.name]
+                    break
+                parent = parent.parent
+            excluded[group_index] = target
+        return excluded
 
 ##################################### Set ###################################
     def set_function(self):
