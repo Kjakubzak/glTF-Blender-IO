@@ -129,6 +129,53 @@ class KHR_OT_capture_reference_pose(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class KHR_OT_capture_expression(bpy.types.Operator):
+    """Key the change between a neutral and a peak state of the active armature (and its shape keys) as a
+    two-key expression action, and add it as an ACTION expression"""
+    bl_idname = 'khr_character.capture_expression'
+    bl_label = 'Capture Expression'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    name: bpy.props.StringProperty(name='Name', default='expression')
+    source: bpy.props.EnumProperty(name='Source', items=(
+        ('ACTION', 'Action Frames', 'Neutral and peak frames of an action'),
+        ('CONTROL', 'Control', 'Neutral and peak values of a property of the armature object')), default='ACTION')
+    action_name: bpy.props.StringProperty(name='Action')
+    neutral_frame: bpy.props.IntProperty(name='Neutral Frame', default=0)
+    peak_frame: bpy.props.IntProperty(name='Peak Frame', default=24)
+    control_path: bpy.props.StringProperty(name='Control', description='e.g. pose.bones["face"]["smile"]')
+    neutral_value: bpy.props.FloatProperty(name='Neutral Value', default=0.0)
+    peak_value: bpy.props.FloatProperty(name='Peak Value', default=1.0)
+    look: bpy.props.EnumProperty(name='Look', items=(
+        ('NONE', 'None', ''), ('LEFT', 'Left', ''), ('RIGHT', 'Right', ''), ('UP', 'Up', ''), ('DOWN', 'Down', '')),
+        default='NONE', description='Also rotate the mapped eyes about a head-frame axis (character directions)')
+    look_angle: bpy.props.FloatProperty(name='Look Angle', default=12.0, min=0.0, max=90.0)
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and context.active_object.type == 'ARMATURE'
+
+    def execute(self, context):
+        from .capture import capture_expression
+        ob = context.active_object
+        mapping = humanoid_mapping(ob)
+        if self.look != 'NONE' and 'head' not in mapping:
+            self.report({'ERROR'}, 'Look needs a vrm1_humanoid mapping with head (and eyes)')
+            return {'CANCELLED'}
+        action = bpy.data.actions.get(self.action_name) if self.action_name else None
+        if self.source == 'ACTION' and self.action_name and action is None:
+            self.report({'ERROR'}, 'No action ' + self.action_name)
+            return {'CANCELLED'}
+        out, warnings = capture_expression(
+            ob, self.name, mapping, source=self.source, action=action, neutral_frame=self.neutral_frame,
+            peak_frame=self.peak_frame, control_path=self.control_path, neutral_value=self.neutral_value,
+            peak_value=self.peak_value, look=self.look, look_angle=self.look_angle)
+        for w in warnings:
+            self.report({'WARNING'}, w)
+        self.report({'INFO'}, 'Captured expression action ' + out.name)
+        return {'FINISHED'}
+
+
 class KHR_PT_skeleton_mapping(bpy.types.Panel):
     bl_label = 'KHR_character Skeleton Mapping'
     bl_space_type = 'PROPERTIES'
@@ -275,7 +322,9 @@ class KHR_PT_expressions(bpy.types.Panel):
         col = row.column(align=True)
         col.operator(KHR_OT_expression_add.bl_idname, icon='ADD', text='')
         col.operator(KHR_OT_expression_remove.bl_idname, icon='REMOVE', text='')
-        layout.operator(KHR_OT_suggest_arkit_expressions.bl_idname)
+        row = layout.row(align=True)
+        row.operator(KHR_OT_suggest_arkit_expressions.bl_idname)
+        row.operator(KHR_OT_capture_expression.bl_idname)
         if not len(sc.expressions):
             return
         e = sc.expressions[min(sc.active_expression, len(sc.expressions) - 1)]
@@ -300,6 +349,7 @@ classes = (
     KHR_OT_auto_map_skeleton,
     KHR_OT_make_t_pose,
     KHR_OT_capture_reference_pose,
+    KHR_OT_capture_expression,
     KHR_UL_expressions,
     KHR_OT_expression_add,
     KHR_OT_expression_remove,

@@ -450,6 +450,74 @@ describe('Exporter', function () {
                 assert.deepStrictEqual(peaks.smileHalf, { Face: [0, 0.5, 0] });
             });
 
+            it('exports joint, captured and head-frame expressions', function () {
+                const load = name => {
+                    const gltfPath = path.resolve(outDirPath, name + '.gltf');
+                    const bufferCache = {};  // keyed by buffer index, so one per file
+                    const asset = JSON.parse(fs.readFileSync(gltfPath));
+                    for (const ext of ['KHR_character', 'KHR_character_expression', 'KHR_character_expression_joint']) {
+                        assert.ok(asset.extensionsUsed.includes(ext), name + ' ' + ext);
+                        assert.ok(!(asset.extensionsRequired || []).includes(ext), name + ' ' + ext);
+                    }
+                    const data = accessor => getAccessorData(gltfPath, asset, accessor, bufferCache);
+                    const entry = asset.extensions.KHR_character_expression.expressions[0];
+                    const animation = asset.animations[entry.animation];
+                    for (const ch of animation.channels) {
+                        const times = data(animation.samplers[ch.sampler].input);
+                        assert.ok(times.length >= 2 && Math.abs(times[0]) < 1e-6 && Math.abs(times[times.length - 1] - 1) < 1e-5, name);
+                    }
+                    return { asset, data, entry, animation };
+                };
+                const nodeName = (asset, ch) => asset.nodes[ch.target.node].name;
+
+                let { asset, data, entry, animation } = load('56_expr_joint');
+                assert.deepStrictEqual(asset.animations.map(a => a.name), ['clip', 'nod']);
+                assert.deepStrictEqual(entry.extensions, { KHR_character_expression_joint: { channels: [0] } });
+                assert.deepStrictEqual(animation.channels.map(c => [nodeName(asset, c), c.target.path]), [['mixamorig:Head', 'rotation']]);
+
+                ({ asset, data, entry, animation } = load('56b_expr_from_control'));
+                const joint = entry.extensions.KHR_character_expression_joint.channels;
+                const morph = entry.extensions.KHR_character_expression_morphtarget.channels;
+                assert.deepStrictEqual([...joint, ...morph].sort(), animation.channels.map((c, i) => i));
+                assert.ok(joint.some(i => nodeName(asset, animation.channels[i]) === 'mixamorig:Head'));
+                assert.strictEqual(morph.length, 1);
+                const weights = data(animation.samplers[animation.channels[morph[0]].sampler].output);
+                assert.ok(Math.abs(weights[0] - 0.2) < 1e-4, 't = 0 equals the neutral');
+                assert.ok(Math.abs(weights[weights.length - 2] - 1.0) < 1e-4, 'peak');
+
+                ({ asset, data, entry, animation } = load('56c_expr_headframe'));
+                const parent = {};
+                asset.nodes.forEach((n, i) => (n.children || []).forEach(c => { parent[c] = i; }));
+                const rotate = (q, v) => {
+                    const [x, y, z, w] = q;
+                    const t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
+                    return [v[0] + w * t[0] + (y * t[2] - z * t[1]), v[1] + w * t[1] + (z * t[0] - x * t[2]), v[2] + w * t[2] + (x * t[1] - y * t[0])];
+                };
+                const worldPos = (index, rotations) => {
+                    let p = [0, 0, 0];
+                    for (let i = index; i !== undefined; i = parent[i]) {
+                        const n = asset.nodes[i];
+                        p = rotate(rotations[i] || n.rotation || [0, 0, 0, 1], p);
+                        const t = n.translation || [0, 0, 0];
+                        p = [p[0] + t[0], p[1] + t[1], p[2] + t[2]];
+                    }
+                    return p;
+                };
+                const peak = {};
+                for (const ch of animation.channels) {
+                    if (ch.target.path !== 'rotation') continue;
+                    const v = data(animation.samplers[ch.sampler].output);
+                    peak[ch.target.node] = v.slice(v.length - 4);
+                }
+                for (const side of ['L', 'R']) {
+                    const tip = asset.nodes.findIndex(n => n.name === 'eyeTip.' + side);
+                    const before = worldPos(tip, {});
+                    const after = worldPos(tip, peak);
+                    assert.ok(after[0] - before[0] > 0.0035, side + ' moves toward character-left');
+                    assert.ok(Math.abs(after[1] - before[1]) < 0.002, side + ' stays level');
+                }
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));
