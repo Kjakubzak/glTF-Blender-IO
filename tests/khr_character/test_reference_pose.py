@@ -37,6 +37,16 @@ def a_pose_rig(name='mixamo', tail_mode='perpendicular'):
     return ob, expected
 
 
+def transformed_rig(transform, name='mixamo'):
+    """A-pose rig whose rest heads are mapped by transform((x, y, z)) in armature space."""
+    bones, expected = rigs.RIGS[name]()
+    bones = [(n, p, transform(h)) for n, p, h in rigs.a_pose(bones, expected)]
+    ob = rigs.build_armature(bones)
+    bpy.context.view_layer.objects.active = ob
+    assert bpy.ops.khr_character.auto_map_skeleton('EXEC_DEFAULT') == {'FINISHED'}
+    return ob, expected
+
+
 class MakeTPose(unittest.TestCase):
     def setUp(self):
         u.clear_scene()
@@ -84,6 +94,104 @@ class MakeTPose(unittest.TestCase):
             self.assertLess(float(abs(a_pos[b] - rest[b]).max()), 1e-5)
         # the scene itself is left in rest pose
         self.assertTrue(all(pb.matrix_basis.is_identity for pb in ob.pose.bones))
+
+    def check_frame_t_pose(self, g, expected):
+        """T-pose in the character frame of the exported rest pose (not glTF axes)."""
+        import numpy as np
+        rest = u.world_positions(g)
+        up = rest[expected['head']] - rest[expected['hips']]
+        lr = rest[expected['leftUpperLeg']] - rest[expected['rightUpperLeg']]
+        up = up / np.linalg.norm(up)
+        left = lr - up * np.dot(lr, up)
+        left = left / np.linalg.norm(left)
+        forward = np.cross(left, up)
+        pos = u.world_positions(g, g.animation('t_pose'))
+        for side, sx in (('left', 1.0), ('right', -1.0)):
+            for a, b, tol in (('UpperArm', 'LowerArm', 2.0), ('LowerArm', 'Hand', 2.0),
+                              ('IndexProximal', 'IndexIntermediate', 3.0)):
+                d = pos[expected[side + b]] - pos[expected[side + a]]
+                self.assertLess(u.angle_deg(d, sx * left), tol, (side, a))
+            d = pos[expected[side + 'LowerLeg']] - pos[expected[side + 'UpperLeg']]
+            self.assertLess(u.angle_deg(d, -up), 2.0, (side, 'leg'))
+            d = pos[expected[side + 'ThumbDistal']] - pos[expected[side + 'ThumbProximal']]
+            self.assertLess(u.angle_deg(d, sx * left + forward), 3.0, (side, 'thumb'))
+        return up, left, forward
+
+    def test_rig_facing_plus_y(self):
+        ob, expected = transformed_rig(lambda h: (-h[0], -h[1], h[2]))
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        g = u.Glb(u.export('refpose_plus_y', export_khr_character=True, export_animation_mode='ACTIONS'))
+        up, left, forward = self.check_frame_t_pose(g, expected)
+        self.assertLess(u.angle_deg(left, (-1, 0, 0)), 1.0)  # glTF: character-left is -X for this rig
+        self.assertLess(u.angle_deg(up, (0, 1, 0)), 1.0)
+
+    def test_y_up_rig_rotated_on_x(self):
+        import math
+        ob, expected = transformed_rig(lambda h: (h[0], h[2], -h[1]))  # Y-up, front +Z bones (FBX import)
+        ob.rotation_euler = (math.pi / 2, 0.0, 0.0)
+        bpy.context.view_layer.update()
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        g = u.Glb(u.export('refpose_y_up', export_khr_character=True, export_animation_mode='ACTIONS'))
+        up, left, forward = self.check_frame_t_pose(g, expected)
+        self.assertLess(u.angle_deg(up, (0, 1, 0)), 1.0)
+        self.assertLess(u.angle_deg(forward, (0, 0, 1)), 1.0)
+
+    def test_rerun_supersedes_and_duplicates_abort(self):
+        ob, expected = a_pose_rig()
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        flagged = [a.name for a in bpy.data.actions if a.khr_reference_pose.is_reference]
+        self.assertEqual(flagged, ['t_pose'])
+        g = u.Glb(u.export('refpose_rerun', export_khr_character=True, export_animation_mode='ACTIONS'))
+        self.assertEqual([a['name'] for a in g.json['animations']].count('t_pose'), 1)
+        old = [a for a in bpy.data.actions if a.name.endswith('.superseded')][0]
+        old.khr_reference_pose.is_reference = True
+        old.use_fake_user = True
+        with self.assertRaises(RuntimeError):
+            u.export('refpose_duplicate', export_khr_character=True, export_animation_mode='ACTIONS')
+
+    def test_nla_tracks_mode(self):
+        ob, expected = a_pose_rig()
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        track = ob.animation_data.nla_tracks.new()
+        track.name = 'Reference'
+        track.strips.new('t_pose', 1, bpy.data.actions['t_pose'])
+        g = u.Glb(u.export('refpose_nla', export_khr_character=True, export_animation_mode='NLA_TRACKS'))
+        a = g.animation('Reference')
+        self.assertEqual(a['extensions']['KHR_character_reference_pose'], {'poseType': 't_pose'})
+        for ch in a['channels']:
+            self.assertEqual(g.json['accessors'][a['samplers'][ch['sampler']]['input']]['count'], 1)
+
+    def test_distal_with_two_children(self):
+        bones, expected = rigs.mixamo()
+        bones = rigs.a_pose(bones, expected)
+        heads = {n: h for n, _p, h in bones}
+        for side in ('Left', 'Right'):
+            distal = 'mixamorig:{}HandIndex3'.format(side)
+            h = heads[distal]
+            bones.append(('{}_nail'.format(distal), distal, (h[0], h[1] - 0.01, h[2] + 0.005)))
+        ob = rigs.build_armature(bones, tail_mode='perpendicular')
+        bpy.context.view_layer.objects.active = ob
+        bpy.ops.khr_character.auto_map_skeleton('EXEC_DEFAULT')
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        g = u.Glb(u.export('refpose_two_children', export_khr_character=True, export_animation_mode='ACTIONS'))
+        pos = u.world_positions(g, g.animation('t_pose'))
+        for side, sx in (('Left', 1), ('Right', -1)):
+            d = pos['mixamorig:{}HandIndex4'.format(side)] - pos['mixamorig:{}HandIndex3'.format(side)]
+            self.assertLess(u.angle_deg(d, (sx, 0, 0)), 3.0, side)
+
+    def test_leaning_spine_warns(self):
+        from io_scene_gltf2.blender.exp.khr_character.tpose import character_frame
+        bones, expected = rigs.mixamo()
+        bones = [(n, p, (h[0] + (0.15 if n == 'mixamorig:Head' else 0.0), h[1], h[2])) for n, p, h in bones]
+        ob = rigs.build_armature(bones)
+        bpy.context.view_layer.objects.active = ob
+        report = []
+        character_frame(ob, expected, report)
+        self.assertTrue(any('neck -> head leans' in r for r in report), report)
+        report = []
+        character_frame(rigs.build_armature(rigs.mixamo()[0], name='Upright'), expected, report)
+        self.assertEqual(report, [])
 
     def test_distal_uses_unmapped_tip_child(self):
         # every tail is perpendicular to its limb; the 4th finger/thumb segments are unmapped tip bones

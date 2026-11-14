@@ -91,6 +91,39 @@ class Export(unittest.TestCase):
         roles = g.json['extensions']['KHR_character_skeleton_mapping']['skeletalRigMappings']['vrm1_humanoid']
         self.assertNotIn('jaw', roles)
 
+    def test_unknown_role_strict_and_lenient(self):
+        bones, expected = rigs.cartoon3finger()
+        ob = rigs.build_armature(bones)
+        add_set(ob, dict(expected, leftWing='chest'))
+        with self.assertRaises(RuntimeError):
+            u.export('skelmap_unknown', export_khr_character=True)
+        g = u.Glb(u.export('skelmap_unknown_lenient', export_khr_character=True, export_khr_strict=False))
+        roles = g.json['extensions']['KHR_character_skeleton_mapping']['skeletalRigMappings']['vrm1_humanoid']
+        self.assertNotIn('leftWing', roles)
+        self.assertIn('chest', roles)
+
+    def test_deform_bones_only_keeps_mapped_bones(self):
+        bones, expected = rigs.mixamo()
+        ob = rigs.build_armature(bones)
+        non_deform = ['mixamorig:Spine1', 'mixamorig:Neck', 'mixamorig:LeftShoulder']
+        for name in non_deform:
+            ob.data.bones[name].use_deform = False
+        data = bpy.data.meshes.new('Body')
+        data.from_pydata([(-0.1, 0, 0.9), (0.1, 0, 0.9), (0.1, 0, 1.1), (-0.1, 0, 1.1)], [], [(0, 1, 2, 3)])
+        me = bpy.data.objects.new('Body', data)
+        bpy.context.scene.collection.objects.link(me)
+        me.parent = ob
+        me.modifiers.new('Armature', 'ARMATURE').object = ob
+        vg = me.vertex_groups.new(name='mixamorig:Hips')
+        vg.add([0, 1, 2, 3], 1.0, 'REPLACE')
+        g = u.Glb(u.export('skelmap_defonly_off', export_def_bones=True))
+        names = [n.get('name') for n in g.json['nodes']]
+        self.assertTrue(all(n not in names for n in non_deform))
+        add_set(ob, expected)
+        g = u.Glb(u.export('skelmap_defonly', export_khr_character=True, export_def_bones=True))
+        roles = g.json['extensions']['KHR_character_skeleton_mapping']['skeletalRigMappings']['vrm1_humanoid']
+        self.assertEqual({r: g.json['nodes'][a['node']]['name'] for r, a in roles.items()}, expected)
+
     def test_custom_set_and_partial_mapping(self):
         bones, _ = rigs.cartoon3finger()
         ob = rigs.build_armature(bones)
