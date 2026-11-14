@@ -30,13 +30,33 @@ ARM_ORDER = ['UpperArm', 'LowerArm', 'Hand', 'ThumbMetacarpal', 'ThumbProximal',
 
 SPINE_CHAIN = ('hips', 'spine', 'chest', 'upperChest', 'neck', 'head')
 LEAN_LIMIT_DEG = 20.0
+SNAP_LIMIT_DEG = 30.0
+
+
+def _snap(v, exclude=None):
+    """Nearest armature principal axis (+/-X, +/-Y, +/-Z) to unit vector v, skipping the axis of exclude;
+    returns (axis, angle in degrees)."""
+    import math
+    from mathutils import Vector
+    best = None
+    for i in range(3):
+        if exclude is not None and abs(exclude[i]) > 0.5:
+            continue
+        axis = Vector([0.0, 0.0, 0.0])
+        axis[i] = 1.0 if v[i] >= 0.0 else -1.0
+        if best is None or axis.dot(v) > best.dot(v):
+            best = axis
+    return best, math.degrees(best.angle(v)) if v.length > 1e-9 else 0.0
 
 
 def character_frame(ob, mapping, report=None):
     """(up, left, forward) unit vectors in armature space, from the rig itself: up = head - hips, left =
     leftUpperLeg - rightUpperLeg (else the upper arms, else the shoulders) made orthogonal to up, forward =
-    left x up. Missing roles fall back to the object's world frame (+Z up, +X left). Problems (a mapped left
-    side that the feet place on the character's right, a leaning rest spine or neck) go to report."""
+    left x up. Missing roles fall back to the object's world frame (+Z up, +X left). up and then left are
+    snapped to the nearest principal axis of the armature (so a rest posture lean does not tilt the targets,
+    and a -Y/+Z rig gets exactly +/-X and -Z); a direction more than 30 degrees from every axis stays
+    unsnapped, with a warning. Problems (a mapped left side that the feet place on the character's right,
+    a leaning rest spine or neck) go to report."""
     import math
     from mathutils import Vector
     report = report if report is not None else []
@@ -54,15 +74,30 @@ def character_frame(ob, mapping, report=None):
             break
     else:
         lr = to_arm @ Vector((1.0, 0.0, 0.0))
+    raw_up = up.copy()
+    axis, off = _snap(up)
+    snapped = off <= SNAP_LIMIT_DEG
+    if snapped:
+        up = axis
+    else:
+        report.append('hips to head is {:.0f} degrees from every armature axis; the T-pose uses it unsnapped'.format(
+            off))
     left = (lr - up * lr.dot(up)).normalized()
+    if snapped:
+        axis, off = _snap(left, exclude=up)
+        if off <= SNAP_LIMIT_DEG:
+            left = axis
+        else:
+            report.append('the left-right axis is {:.0f} degrees from every armature axis; the T-pose uses it '
+                          'unsnapped'.format(off))
     forward = left.cross(up)
     toes = [head[s + 'Toes'] - head[s + 'Foot'] for s in ('left', 'right') if s + 'Toes' in head and s + 'Foot' in head]
     if toes and sum(toes, Vector()).dot(forward) < 0.0:
         report.append('the mapped left side is on the character\'s right (the toes point backwards in the '
                       'frame derived from the mapping); check the left/right roles')
-    if math.degrees(up.angle(world_up)) > LEAN_LIMIT_DEG:
+    if math.degrees(raw_up.angle(world_up)) > LEAN_LIMIT_DEG:
         report.append('the rig is not upright in world space (hips to head {:.0f} degrees from world up); the '
-                      'T-pose uses the rig\'s own up'.format(math.degrees(up.angle(world_up))))
+                      'T-pose uses the rig\'s own up'.format(math.degrees(raw_up.angle(world_up))))
     chain = [r for r in SPINE_CHAIN if r in head]
     for a, b in zip(chain, chain[1:]):
         d = head[b] - head[a]
