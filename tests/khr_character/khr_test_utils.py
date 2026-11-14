@@ -97,18 +97,19 @@ def quat_matrix(q):
                      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
-def pose_values(g, animation):
-    """{(node, path): first output value} of an animation."""
+def pose_values(g, animation, key=0):
+    """{(node, path): output value of key} for the TRS channels of an animation (LINEAR/STEP)."""
     out = {}
     for ch in animation['channels']:
-        s = animation['samplers'][ch['sampler']]
-        out[(ch['target']['node'], ch['target']['path'])] = g.accessor(s['output'])[0]
+        if ch['target']['path'] in ('translation', 'rotation', 'scale'):
+            s = animation['samplers'][ch['sampler']]
+            out[(ch['target']['node'], ch['target']['path'])] = g.accessor(s['output'])[key]
     return out
 
 
-def world_positions(g, animation=None):
-    """Global translation of every node, with an animation's first key applied (reference pose)."""
-    pose = pose_values(g, animation) if animation else {}
+def world_positions(g, animation=None, key=0):
+    """Global translation of every node, with one key of an animation applied (default: the first)."""
+    pose = pose_values(g, animation, key) if animation else {}
     nodes = g.json['nodes']
     parent = {}
     for i, n in enumerate(nodes):

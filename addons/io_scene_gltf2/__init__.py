@@ -1422,9 +1422,12 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
                 pre_export_callbacks.append(module.glTF2_pre_export_callback)
             if hasattr(module, 'glTF2_post_export_callback'):
                 post_export_callbacks.append(module.glTF2_post_export_callback)
+        save = gltf2_blender_export.save
         if self.export_khr_character:
             from .blender.exp.khr_character import KhrCharacterExportExtension
-            user_extensions.append(KhrCharacterExportExtension())
+            khr_character = KhrCharacterExportExtension()
+            user_extensions.append(khr_character)
+            save = khr_character.guard(save)
         export_settings['gltf_user_extensions'] = user_extensions
         export_settings['pre_export_callbacks'] = pre_export_callbacks
         export_settings['post_export_callbacks'] = post_export_callbacks
@@ -1443,7 +1446,7 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
             from pstats import SortKey
             pr = cProfile.Profile()
             pr.enable()
-            res = gltf2_blender_export.save(context, export_settings)
+            res = save(context, export_settings)
             pr.disable()
             s = io.StringIO()
             sortby = SortKey.TIME
@@ -1451,7 +1454,7 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
             ps.print_stats()
             print(s.getvalue())
         else:
-            res = gltf2_blender_export.save(context, export_settings)
+            res = save(context, export_settings)
 
         # Display popup log, if any
         for message_type, message in export_settings['log'].messages():
