@@ -521,6 +521,28 @@ describe('Exporter', function () {
                 }
             });
 
+            it('exports a vrm1_expressions mapping set', function () {
+                let gltfPath = path.resolve(outDirPath, '57_mapping.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+                for (const ext of ['KHR_character', 'KHR_character_expression', 'KHR_character_expression_mapping']) {
+                    assert.ok(asset.extensionsUsed.includes(ext), ext);
+                    assert.ok(!(asset.extensionsRequired || []).includes(ext), ext);
+                }
+                const names = asset.extensions.KHR_character_expression.expressions.map(e => e.name);
+                const sets = asset.extensions.KHR_character_expression_mapping.expressionSetMappings;
+                assert.deepStrictEqual(Object.keys(sets), ['vrm1_expressions']);
+                const resolved = {};
+                for (const [input, entries] of Object.entries(sets.vrm1_expressions)) {
+                    resolved[input] = entries.map(e => [names[e.source], e.weight]);
+                }
+                assert.deepStrictEqual(resolved.aa, [['jawOpen', 1]]);
+                assert.deepStrictEqual(resolved.happy, [['mouthSmileLeft', 1], ['mouthSmileRight', 1]]);
+                assert.deepStrictEqual(resolved.blink, [['eyeBlinkLeft', 1], ['eyeBlinkRight', 1]]);
+                assert.deepStrictEqual(resolved.blinkRight, [['eyeBlinkRight', 1]]);
+                assert.deepStrictEqual(resolved.ou, [['mouthPucker', 1], ['jawOpen', 0.2]]);
+                assert.deepStrictEqual(resolved.sad, [['browInnerUp', 1]]);
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));
