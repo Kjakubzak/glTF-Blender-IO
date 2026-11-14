@@ -136,6 +136,22 @@ class MakeTPose(unittest.TestCase):
         self.assertLess(u.angle_deg(up, (0, 1, 0)), 1.0)
         self.assertLess(u.angle_deg(forward, (0, 0, 1)), 1.0)
 
+    def test_posture_lean_snaps_to_armature_axes(self):
+        import math
+        t = math.radians(2.0)  # 2 degree forward lean of the whole rest pose (head towards -Y)
+        ob, expected = transformed_rig(lambda h: (h[0], h[1] * math.cos(t) - (h[2] - 1.0) * math.sin(t),
+                                                  1.0 + h[1] * math.sin(t) + (h[2] - 1.0) * math.cos(t)))
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        g = u.Glb(u.export('refpose_lean', export_khr_character=True, export_animation_mode='ACTIONS'))
+        pos = u.world_positions(g, g.animation('t_pose'))
+        for side, sx in (('left', 1.0), ('right', -1.0)):
+            d = pos[expected[side + 'LowerLeg']] - pos[expected[side + 'UpperLeg']]
+            self.assertLess(u.angle_deg(d, (0, -1, 0)), 0.01, side)
+            d = pos[expected[side + 'LowerArm']] - pos[expected[side + 'UpperArm']]
+            self.assertLess(u.angle_deg(d, (sx, 0, 0)), 0.01, side)
+            d = pos[expected[side + 'ThumbDistal']] - pos[expected[side + 'ThumbProximal']]
+            self.assertLess(u.angle_deg(d, (sx, 0, 1)), 0.01, side)
+
     def test_rerun_supersedes_and_duplicates_abort(self):
         ob, expected = a_pose_rig()
         bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
