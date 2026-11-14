@@ -103,8 +103,9 @@ def gltf(ctx, scenes, animations):
     if not flagged:
         return
     found = set()
+    expression_animations = [e['animation'] for e in getattr(ctx, 'expressions', [])]
     for animation in animations:
-        if animation.name in flagged:
+        if animation.name in flagged and not any(animation is a for a in expression_animations):
             slice_to_reference_pose(animation, flagged[animation.name], ctx)
             found.add(animation.name)
             if not animation.channels:

@@ -422,6 +422,37 @@ describe('Exporter', function () {
                 }
             });
 
+            it('exports shape-key expressions across meshes', function () {
+                let gltfPath = path.resolve(outDirPath, '55_expr_multimesh.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+                const bufferCache = {};
+                for (const name of ['KHR_character', 'KHR_character_expression', 'KHR_character_expression_morphtarget']) {
+                    assert.ok(asset.extensionsUsed.includes(name), name);
+                    assert.ok(!(asset.extensionsRequired || []).includes(name), name);
+                }
+                const entries = asset.extensions.KHR_character_expression.expressions;
+                assert.deepStrictEqual(entries.map(e => e.name), ['eyeBlinkLeft', 'jawOpen', 'mouthSmileLeft', 'tongueOut', 'smileHalf']);
+                const peaks = {};
+                for (const entry of entries) {
+                    const animation = asset.animations[entry.animation];
+                    assert.strictEqual(animation.name, entry.name);
+                    assert.deepStrictEqual(entry.extensions.KHR_character_expression_morphtarget.channels, animation.channels.map((c, i) => i));
+                    peaks[entry.name] = {};
+                    for (const ch of animation.channels) {
+                        assert.strictEqual(ch.target.path, 'weights');
+                        const sampler = animation.samplers[ch.sampler];
+                        assert.deepStrictEqual(getAccessorData(gltfPath, asset, sampler.input, bufferCache), [0, 1]);
+                        const values = getAccessorData(gltfPath, asset, sampler.output, bufferCache);
+                        const n = values.length / 2;
+                        assert.strictEqual(n, asset.meshes[asset.nodes[ch.target.node].mesh].primitives[0].targets.length);
+                        peaks[entry.name][asset.nodes[ch.target.node].name] = values.slice(n).map((v, i) => Math.round((v - values[i]) * 1000) / 1000);
+                    }
+                }
+                assert.deepStrictEqual(peaks.jawOpen, { Face: [1, 0, 0], Teeth: [1], Tongue: [1, 0] });
+                assert.deepStrictEqual(peaks.tongueOut, { Tongue: [0, 1] });
+                assert.deepStrictEqual(peaks.smileHalf, { Face: [0, 0.5, 0] });
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));

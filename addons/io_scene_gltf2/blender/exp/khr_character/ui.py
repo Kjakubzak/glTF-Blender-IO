@@ -165,10 +165,157 @@ class KHR_PT_skeleton_mapping(bpy.types.Panel):
                 row.prop_search(e, 'bone', ob.data, 'bones', text='')
 
 
+class KHR_UL_expressions(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.prop(item, 'name', text='', emboss=False)
+        layout.label(text=item.source.replace('_', ' ').title())
+
+
+class KHR_OT_expression_add(bpy.types.Operator):
+    """Add a shape-key expression"""
+    bl_idname = 'khr_character.expression_add'
+    bl_label = 'Add Expression'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        sc = context.scene.khr_character
+        e = sc.expressions.add()
+        e.name = 'expression.{:03d}'.format(len(sc.expressions))
+        sc.active_expression = len(sc.expressions) - 1
+        return {'FINISHED'}
+
+
+class KHR_OT_expression_remove(bpy.types.Operator):
+    """Remove the active expression"""
+    bl_idname = 'khr_character.expression_remove'
+    bl_label = 'Remove Expression'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.khr_character.expressions) > 0
+
+    def execute(self, context):
+        sc = context.scene.khr_character
+        sc.expressions.remove(sc.active_expression)
+        sc.active_expression = max(0, min(sc.active_expression, len(sc.expressions) - 1))
+        return {'FINISHED'}
+
+
+class KHR_OT_expression_key_add(bpy.types.Operator):
+    """Add a shape key to the active expression"""
+    bl_idname = 'khr_character.expression_key_add'
+    bl_label = 'Add Shape Key'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.khr_character.expressions) > 0
+
+    def execute(self, context):
+        sc = context.scene.khr_character
+        sc.expressions[sc.active_expression].shape_key_weights.add()
+        return {'FINISHED'}
+
+
+class KHR_OT_expression_key_remove(bpy.types.Operator):
+    """Remove a shape key from the active expression"""
+    bl_idname = 'khr_character.expression_key_remove'
+    bl_label = 'Remove Shape Key'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        sc = context.scene.khr_character
+        weights = sc.expressions[sc.active_expression].shape_key_weights
+        if 0 <= self.index < len(weights):
+            weights.remove(self.index)
+        return {'FINISHED'}
+
+
+def scene_shape_key_names(scene):
+    names = []
+    for ob in scene.objects:
+        if ob.type == 'MESH' and ob.data.shape_keys is not None:
+            for k in ob.data.shape_keys.key_blocks[1:]:
+                if k.name not in names:
+                    names.append(k.name)
+    return names
+
+
+class KHR_OT_suggest_arkit_expressions(bpy.types.Operator):
+    """Add one expression per ARKit blend-shape name found among the scene's shape keys (existing names are kept)"""
+    bl_idname = 'khr_character.suggest_arkit_expressions'
+    bl_label = 'Suggest ARKit Expressions'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from ...com.khr_character.expression_names import suggest_arkit
+        sc = context.scene.khr_character
+        existing = {e.name for e in sc.expressions}
+        added = 0
+        for name, key in suggest_arkit(scene_shape_key_names(context.scene)):
+            if name in existing:
+                continue
+            e = sc.expressions.add()
+            e.name = name
+            e.source = 'SHAPE_KEYS'
+            w = e.shape_key_weights.add()
+            w.key_name = key
+            w.weight = 1.0
+            added += 1
+        self.report({'INFO'}, 'Added {} expressions'.format(added))
+        return {'FINISHED'}
+
+
+class KHR_PT_expressions(bpy.types.Panel):
+    bl_label = 'KHR_character Expressions'
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'scene'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        sc = context.scene.khr_character
+        row = layout.row()
+        row.template_list('KHR_UL_expressions', '', sc, 'expressions', sc, 'active_expression', rows=4)
+        col = row.column(align=True)
+        col.operator(KHR_OT_expression_add.bl_idname, icon='ADD', text='')
+        col.operator(KHR_OT_expression_remove.bl_idname, icon='REMOVE', text='')
+        layout.operator(KHR_OT_suggest_arkit_expressions.bl_idname)
+        if not len(sc.expressions):
+            return
+        e = sc.expressions[min(sc.active_expression, len(sc.expressions) - 1)]
+        layout.prop(e, 'name')
+        layout.prop(e, 'source')
+        if e.source == 'SHAPE_KEYS':
+            for i, w in enumerate(e.shape_key_weights):
+                row = layout.row(align=True)
+                row.prop(w, 'key_name', text='')
+                row.prop(w, 'weight', text='')
+                row.prop(w, 'object', text='')
+                row.operator(KHR_OT_expression_key_remove.bl_idname, icon='X', text='').index = i
+            layout.operator(KHR_OT_expression_key_add.bl_idname, icon='ADD')
+        else:
+            layout.prop(e, 'action')
+            layout.prop(e, 'track_name')
+            layout.prop(e, 'allow_joints')
+            layout.prop(e, 'allow_morphs')
+
+
 classes = (
     KHR_OT_auto_map_skeleton,
     KHR_OT_make_t_pose,
     KHR_OT_capture_reference_pose,
+    KHR_UL_expressions,
+    KHR_OT_expression_add,
+    KHR_OT_expression_remove,
+    KHR_OT_expression_key_add,
+    KHR_OT_expression_key_remove,
+    KHR_OT_suggest_arkit_expressions,
+    KHR_PT_expressions,
     KHR_PT_skeleton_mapping,
 )
 
