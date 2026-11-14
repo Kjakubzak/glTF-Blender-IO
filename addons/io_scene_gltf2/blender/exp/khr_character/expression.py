@@ -54,6 +54,78 @@ def pre_export(ctx):
                 ctx.initial_key_values[(ob.name, k.name)] = float(k.value)
 
 
+def _expression_actions(ctx):
+    if not hasattr(ctx, 'expression_actions'):
+        ctx.expression_actions = {e.action.name for e in ctx.scene_data.expressions
+                                  if e.source == 'ACTION' and e.action is not None}
+    return ctx.expression_actions
+
+
+def _uses(ad, action):
+    return ad is not None and (ad.action == action or any(
+        st.action == action for track in ad.nla_tracks for st in track.strips))
+
+
+def animation_switch(ctx, ob, action, slot, on_type):
+    """While an ACTION expression's action is sampled (by any object: the core exporter caches every object's
+    values during one object's pass), mute the drivers on the channels it animates and disable the
+    constraints of the bones it animates, on every object or shape-key datablock that plays the action:
+    they would override, or re-apply on top of, the keyed curves (Capture Expression bakes their evaluated
+    result). Restored on the next switch, at the end of each object's loop, in gather_gltf_hook and on any
+    abort."""
+    restore(ctx)
+    if action is None or action.name not in _expression_actions(ctx):
+        return
+    owners = []
+    for o in bpy.context.scene.objects:
+        if o == ob and on_type == 'OBJECT' or _uses(o.animation_data, action):
+            owners.append((o, o, 'OBJECT'))
+        keys = getattr(o.data, 'shape_keys', None) if o.type == 'MESH' else None
+        if keys is not None and (o == ob and on_type == 'KEY' or _uses(keys.animation_data, action)):
+            owners.append((o, keys, 'KEY'))
+    muted = ctx.muted = []
+    for o, owner, kind in owners:
+        curves = [fc for layer in getattr(action, 'layers', []) for strip in layer.strips
+                  for bag in strip.channelbags if bag.slot.target_id_type == kind for fc in bag.fcurves]
+        paths = {(fc.data_path, fc.array_index) for fc in curves}
+        ad = owner.animation_data
+        for driver in (ad.drivers if ad is not None else []):
+            if (driver.data_path, driver.array_index) in paths and not driver.mute:
+                driver.mute = True
+                muted.append(driver)
+        if kind == 'OBJECT' and o.type == 'ARMATURE':
+            for name in {fc.data_path.split('"')[1] for fc in curves if fc.data_path.startswith('pose.bones["')}:
+                pb = o.pose.bones.get(name)
+                for con in (pb.constraints if pb is not None else []):
+                    if con.enabled:
+                        con.enabled = False
+                        muted.append(con)
+    if muted:
+        ctx.overridden = getattr(ctx, 'overridden', set())
+        ctx.overridden.add(action.name)
+
+
+def armature_channels(ctx, channels, ob, action):
+    """For an ACTION expression whose action also keys shape keys (a KEY slot), drop the weights channels the
+    core exporter bakes from the armature's shape-key drivers: they would take precedence over the action's
+    own KEY-slot channel when the slots are merged into one animation."""
+    if action is None or action.name not in _expression_actions(ctx):
+        return
+    has_key_slot = any(bag.slot.target_id_type == 'KEY' for layer in getattr(action, 'layers', [])
+                       for strip in layer.strips for bag in strip.channelbags)
+    if has_key_slot:
+        channels[:] = [c for c in channels if c.target.path != 'weights']
+
+
+def restore(ctx):
+    for item in getattr(ctx, 'muted', []):
+        if isinstance(item, bpy.types.FCurve):
+            item.mute = False
+        else:
+            item.enabled = True
+    ctx.muted = []
+
+
 def _initial_weights(ob, node, keys, ctx):
     """Authored initial morph weights of a node: node.weights, else mesh.weights (both gathered before the
     animation pass), else the shape-key values captured in pre_export."""
@@ -258,7 +330,14 @@ def _action_expression(expression, animations, ctx):
     if not kept:
         ctx.error('expression', '"{}": no joint or morph channel in "{}"'.format(expression.name, track))
         return None
-    moving = [k for k in kept if not k[3]] or kept[:1]
+    moving = [k for k in kept if not k[3]]
+    if not moving:
+        ctx.warning('expression "{}": every channel of "{}" is constant at its initial value, so the expression '
+                    'has no effect'.format(expression.name, track))
+        moving = kept[:1]
+    if track in getattr(ctx, 'overridden', set()):
+        ctx.warning('expression "{}": drivers or constraints on its channels were muted while "{}" was '
+                    'sampled'.format(expression.name, track))
     t0 = min(_floats((s or source.samplers[c.sampler]).input)[0] for c, s, _k, _const in moving)
     channels, samplers, joint, morph = [], [], [], []
     for channel, sampler, keys, _constant in moving:

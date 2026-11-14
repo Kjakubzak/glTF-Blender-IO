@@ -172,9 +172,7 @@ class Capture(unittest.TestCase):
         self.assertEqual(bpy.ops.khr_character.capture_expression(
             'EXEC_DEFAULT', name='smile', source='CONTROL', control_path='["smile"]'), {'FINISHED'})
         self.assertEqual(ob['smile'], 0.0)
-        # drivers would override the keyed channels during export sampling (export copies drop them)
-        ob.pose.bones[P + 'Head'].driver_remove('rotation_euler', 0)
-        face.data.shape_keys.key_blocks['mouthSmileLeft'].driver_remove('value')
+        # the drivers stay: the export mutes them only while the expression's action is sampled
         g = u.Glb(u.export('expr_capture', export_khr_character=True, export_animation_mode='ACTIONS'))
         entry = g.json['extensions'][EXT]['expressions'][0]
         anim = g.json['animations'][entry['animation']]
@@ -197,6 +195,25 @@ class Capture(unittest.TestCase):
         times = g.accessor(s['input'])[:, 0]
         self.assertAlmostEqual(float(times[0]), 0.0, places=6)
         self.assertAlmostEqual(float(times[-1]), 1.0, places=5)
+        drivers = list(ob.animation_data.drivers) + list(face.data.shape_keys.animation_data.drivers)
+        self.assertEqual(len(drivers), 2)
+        self.assertFalse(any(d.mute for d in drivers))
+
+    def test_constraints_disabled_while_sampled(self):
+        ob, _ = armature()
+        con = ob.pose.bones[P + 'Head'].constraints.new('LIMIT_ROTATION')
+        con.use_limit_x, con.min_x, con.max_x = True, 0.0, 0.0
+        act = bpy.data.actions.new('tilt')
+        act.use_fake_user = True
+        key_rotation(ob, act, {0: {P + 'Head': (1, 0, 0, 0)}, 24: {P + 'Head': (0.9659, 0.2588, 0, 0)}})
+        add_action_expression('tilt', act)
+        g = u.Glb(u.export('expr_constraint', export_khr_character=True, export_animation_mode='ACTIONS'))
+        anim = g.animation('tilt')
+        self.assertEqual([(c['target']['node'], c['target']['path']) for c in anim['channels']],
+                         [(g.node_index(P + 'Head'), 'rotation')])
+        q = g.accessor(anim['samplers'][anim['channels'][0]['sampler']]['output'])
+        self.assertGreater(2 * np.degrees(np.arccos(min(1.0, abs(float(np.dot(q[0], q[-1])))))), 25.0)
+        self.assertTrue(con.enabled)
 
     def test_look_left_in_head_frame(self):
         eye_rig()

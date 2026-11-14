@@ -42,6 +42,32 @@ class Infra(unittest.TestCase):
         u.clear_scene()
         bpy.ops.mesh.primitive_cube_add()
 
+    def test_geometry_nodes_instances(self):
+        ng = bpy.data.node_groups.new('instances', 'GeometryNodeTree')
+        ng.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        line, cube = ng.nodes.new('GeometryNodeMeshLine'), ng.nodes.new('GeometryNodeMeshCube')
+        inst, out = ng.nodes.new('GeometryNodeInstanceOnPoints'), ng.nodes.new('NodeGroupOutput')
+        ng.links.new(line.outputs['Mesh'], inst.inputs['Points'])
+        ng.links.new(cube.outputs['Mesh'], inst.inputs['Instance'])
+        ng.links.new(inst.outputs['Instances'], out.inputs[0])
+        ob = bpy.context.active_object
+        ob.modifiers.new('instances', 'NODES').node_group = ng
+        g = u.Glb(u.export('gn_instances', export_khr_character=True, export_gn_mesh=True))
+        self.assertIn('GN Instance', [n.get('name') for n in g.json['nodes']])
+        self.assertRegex(g.json['asset']['generator'], GENERATOR_ON)
+        bpy.data.node_groups.remove(ng)
+
+    def test_full_collection_hierarchy(self):
+        coll = bpy.data.collections.new('Group')
+        bpy.context.scene.collection.children.link(coll)
+        ob = bpy.context.active_object
+        for c in list(ob.users_collection):
+            c.objects.unlink(ob)
+        coll.objects.link(ob)
+        g = u.Glb(u.export('collections', export_khr_character=True, export_hierarchy_full_collections=True))
+        self.assertIn('Group', [n.get('name') for n in g.json['nodes']])
+        bpy.data.collections.remove(coll)
+
     def test_black_list_covers_package_properties(self):
         for name in khr.PROPERTY_NAMES:
             self.assertIn(name, extras.BLACK_LIST)
