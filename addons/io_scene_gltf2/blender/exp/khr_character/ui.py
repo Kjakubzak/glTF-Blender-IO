@@ -225,6 +225,55 @@ class KHR_PT_expression_mapping(bpy.types.Panel):
                 row.label(text=', '.join('{} x{:.2f}'.format(x.expression, x.weight) for x in entry.sources))
 
 
+class KHR_OT_suppression_add(bpy.types.Operator):
+    """Add a suppression to the active expression"""
+    bl_idname = 'khr_character.suppression_add'
+    bl_label = 'Add Suppression'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.khr_character.expressions) > 0
+
+    def execute(self, context):
+        sc = context.scene.khr_character
+        sc.expressions[sc.active_expression].suppressions.add()
+        return {'FINISHED'}
+
+
+class KHR_OT_suppression_remove(bpy.types.Operator):
+    """Remove a suppression from the active expression"""
+    bl_idname = 'khr_character.suppression_remove'
+    bl_label = 'Remove Suppression'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        sc = context.scene.khr_character
+        suppressions = sc.expressions[sc.active_expression].suppressions
+        if 0 <= self.index < len(suppressions):
+            suppressions.remove(self.index)
+        return {'FINISHED'}
+
+
+def draw_suppressions(layout, expression):
+    layout.label(text='Suppressions')
+    for i, s in enumerate(expression.suppressions):
+        row = layout.row(align=True)
+        row.prop(s, 'target', text='')
+        row.prop(s, 'type', text='')
+        if s.type == 'CUSTOM':
+            row.prop(s, 'custom_type', text='')
+        row.prop(s, 'amount', text='')
+        if s.type != 'blend':
+            row.prop(s, 'threshold', text='')
+        if s.type == 'CUSTOM':
+            row.prop(s, 'use_threshold', text='')
+        row.operator(KHR_OT_suppression_remove.bl_idname, icon='X', text='').index = i
+    layout.operator(KHR_OT_suppression_add.bl_idname, icon='ADD')
+
+
 class KHR_PT_skeleton_mapping(bpy.types.Panel):
     bl_label = 'KHR_character Skeleton Mapping'
     bl_space_type = 'PROPERTIES'
@@ -392,6 +441,7 @@ class KHR_PT_expressions(bpy.types.Panel):
             layout.prop(e, 'track_name')
             layout.prop(e, 'allow_joints')
             layout.prop(e, 'allow_morphs')
+        draw_suppressions(layout, e)
 
 
 classes = (
@@ -405,6 +455,8 @@ classes = (
     KHR_OT_expression_key_add,
     KHR_OT_expression_key_remove,
     KHR_OT_suggest_arkit_expressions,
+    KHR_OT_suppression_add,
+    KHR_OT_suppression_remove,
     KHR_PT_expressions,
     KHR_OT_suggest_vrm1_mapping,
     KHR_PT_expression_mapping,
