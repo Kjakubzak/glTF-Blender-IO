@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# KHR_character_expression with _morphtarget (I3) and _joint (I4).
+# KHR_character_expression with _morphtarget (I3), _joint (I4) and _suppression (I6).
 # Each SHAPE_KEYS expression becomes a new two-key animation (t = 0 and t = 1 s). For every exported
 # mesh node whose shape keys include a listed key name, it holds one complete weights channel in
 # get_sk_exported order: the authored initial weights (node/mesh weights as exported, never the live
@@ -21,6 +21,7 @@
 # reference poses.
 
 import math
+import re
 import struct
 
 import bpy
@@ -372,10 +373,52 @@ def _float_accessor(values, target, ctx):
                            constants.DataType.Vec4 if width == 4 else constants.DataType.Vec3, False, ctx.settings)
 
 
+CUSTOM_TYPE = re.compile(r'^[A-Z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$')
+
+
+def _suppressions(expression, index, ctx):
+    """KHR_character_expression_suppression object of one scene expression, or None (I6).
+
+    threshold is written for block only (never for blend), and for a custom type when use_threshold is set.
+    """
+    out = []
+    for s in expression.suppressions:
+        if s.target not in index:
+            ctx.error('suppression', '"{}": target expression "{}" is not exported'.format(expression.name, s.target))
+            continue
+        if s.target == expression.name:
+            ctx.warning('expression "{}" suppresses itself'.format(expression.name))
+        item = {'target': index[s.target]}
+        if s.type == 'CUSTOM':
+            if not CUSTOM_TYPE.match(s.custom_type):
+                ctx.error('suppression', '"{}": custom type "{}" is not shaped like a vendor extension name'.format(
+                    expression.name, s.custom_type))
+                continue
+            item['type'] = s.custom_type
+        elif s.type == 'block':
+            item['type'] = 'block'
+        else:
+            item['type'] = 'blend'
+            if s.use_threshold:
+                ctx.warning('expression "{}": threshold ignored on a blend suppression of "{}"'.format(
+                    expression.name, s.target))
+        item['amount'] = round(s.amount, 6)
+        if s.type == 'block' or (s.type == 'CUSTOM' and s.use_threshold):
+            item['threshold'] = round(s.threshold, 6)
+        out.append(item)
+    return {'suppressions': out} if out else None
+
+
 def root(ctx, gltf_root):
     entries = []
+    index = {e['name']: i for i, e in enumerate(getattr(ctx, 'expressions', []))}
+    scene_expressions = {e.name: e for e in ctx.scene_data.expressions}
     for e in getattr(ctx, 'expressions', []):
         extensions = {}
+        suppressions = _suppressions(scene_expressions[e['name']], index, ctx)
+        if suppressions:
+            extensions[khr.EXPRESSION_SUPPRESSION] = suppressions
+            ctx.declare(khr.EXPRESSION_SUPPRESSION)
         if e['morph']:
             extensions[khr.EXPRESSION_MORPHTARGET] = {'channels': e['morph']}
             ctx.declare(khr.EXPRESSION_MORPHTARGET)

@@ -543,6 +543,26 @@ describe('Exporter', function () {
                 assert.deepStrictEqual(resolved.sad, [['browInnerUp', 1]]);
             });
 
+            it('exports expression suppressions', function () {
+                let gltfPath = path.resolve(outDirPath, '58_suppression.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+                for (const ext of ['KHR_character', 'KHR_character_expression', 'KHR_character_expression_suppression']) {
+                    assert.ok(asset.extensionsUsed.includes(ext), ext);
+                    assert.ok(!(asset.extensionsRequired || []).includes(ext), ext);
+                }
+                const entries = asset.extensions.KHR_character_expression.expressions;
+                const index = Object.fromEntries(entries.map((e, i) => [e.name, i]));
+                const sup = name => (entries[index[name]].extensions.KHR_character_expression_suppression || {}).suppressions;
+                assert.deepStrictEqual(sup('eyeBlinkLeft'), [
+                    { target: index.eyeLookUpLeft, type: 'blend', amount: 0.8 },
+                    { target: index.mouthSmileLeft, type: 'block', amount: 0.5, threshold: 0.25 }]);
+                assert.deepStrictEqual(sup('jawOpen'), [{ target: index.mouthSmileLeft, type: 'ACME_expression_curve', amount: 0.3 }]);
+                assert.strictEqual(sup('eyeLookUpLeft'), undefined);
+                for (const e of entries) {
+                    for (const s of sup(e.name) || []) assert.ok(s.type !== 'blend' || s.threshold === undefined);
+                }
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));
