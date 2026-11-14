@@ -560,6 +560,33 @@ describe('Exporter', function () {
                 }
             });
 
+            it('exports camera, look-at and visibility hints', function () {
+                let gltfPath = path.resolve(outDirPath, '59_hints.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+                const hints = ['KHR_node_camera_hint', 'KHR_node_lookat_target', 'KHR_node_visibility_hint', 'KHR_mesh_primitive_visibility_hint'];
+                for (const ext of hints) {
+                    assert.ok(asset.extensionsUsed.includes(ext), ext);
+                    assert.ok(!(asset.extensionsRequired || []).includes(ext), ext);
+                }
+                const node = name => asset.nodes.find(n => n.name === name);
+                const ext = (n, name) => (n.extensions || {})[name];
+                const full = node('full_body'), portrait = node('portrait');
+                assert.strictEqual(full.camera, undefined);
+                assert.strictEqual(portrait.camera, undefined);
+                assert.strictEqual(ext(full, 'KHR_node_camera_hint').role, 'full_body');
+                assert.strictEqual(ext(portrait, 'KHR_node_camera_hint').role, 'portrait');
+                assert.strictEqual(asset.nodes[ext(portrait, 'KHR_node_camera_hint').targetNode].name, 'EyeTarget');
+                const persp = asset.cameras[ext(full, 'KHR_node_camera_hint').camera];
+                const ortho = asset.cameras[ext(portrait, 'KHR_node_camera_hint').camera];
+                assert.ok(Math.abs(persp.perspective.aspectRatio - 1) < 1e-5);
+                assert.ok(Math.abs(ortho.orthographic.xmag - ortho.orthographic.ymag) < 1e-6);
+                assert.deepStrictEqual(ext(node('EyeTarget'), 'KHR_node_lookat_target'), {});
+                assert.deepStrictEqual(ext(node('Helmet'), 'KHR_node_visibility_hint'), { roles: ['third_person', 'first_person'] });
+                const prims = asset.meshes[node('Body').mesh].primitives.filter(p => (p.extensions || {}).KHR_mesh_primitive_visibility_hint);
+                assert.strictEqual(prims.length, 1);
+                assert.strictEqual(asset.materials[prims[0].material].name, 'Hair');
+            });
+
             it('can export all collection instances', function () {
                 let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
                 const asset = JSON.parse(fs.readFileSync(gltfPath));
