@@ -104,7 +104,8 @@ class Export(unittest.TestCase):
 
     def test_deform_bones_only_keeps_mapped_bones(self):
         bones, expected = rigs.mixamo()
-        ob = rigs.build_armature(bones)
+        ob = rigs.build_armature(bones, name='Rig')
+        ob.data.name = 'RigData'  # object and armature data names differ, as in most files
         non_deform = ['mixamorig:Spine1', 'mixamorig:Neck', 'mixamorig:LeftShoulder']
         for name in non_deform:
             ob.data.bones[name].use_deform = False

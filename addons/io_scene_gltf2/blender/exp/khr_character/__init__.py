@@ -106,6 +106,17 @@ class KhrCharacterExportExtension:
         self.is_critical = True
         self.ctx = None
 
+    def guard(self, save):
+        """Wrap the exporter's save() so temporary scene changes (muted drivers, disabled constraints) are
+        undone even when the export raises, wherever the exception comes from."""
+        def guarded(*args):
+            try:
+                return save(*args)
+            finally:
+                if self.ctx is not None:
+                    self._run('restore')
+        return guarded
+
     def _run(self, stage, *args):
         for feature in features.FEATURES:
             fn = getattr(feature, stage, None)
