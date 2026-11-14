@@ -80,8 +80,26 @@ def slice_to_reference_pose(animation, label, ctx):
     animation.extensions[khr.REFERENCE_POSE] = Extension(khr.REFERENCE_POSE, {'poseType': label}, False)
 
 
+def flagged_tracks():
+    """{NLA track name: pose label} for tracks whose single unmuted strip plays a flagged action
+    (export_animation_mode NLA_TRACKS names animations after tracks)."""
+    out = {}
+    for ob in bpy.data.objects:
+        for ad in (ob.animation_data, getattr(getattr(ob.data, 'shape_keys', None), 'animation_data', None)):
+            if ad is None:
+                continue
+            for track in ad.nla_tracks:
+                strips = [st for st in track.strips if st.action is not None and not st.mute]
+                if len(strips) == 1 and strips[0].action.khr_reference_pose.is_reference:
+                    rp = strips[0].action.khr_reference_pose
+                    out[track.name] = rp.custom_pose_type if rp.pose_type == 'CUSTOM' else rp.pose_type
+    return out
+
+
 def gltf(ctx, scenes, animations):
     flagged = flagged_actions()
+    if ctx.settings.get('gltf_animation_mode') == 'NLA_TRACKS':
+        flagged = flagged_tracks()
     if not flagged:
         return
     found = set()
@@ -94,7 +112,8 @@ def gltf(ctx, scenes, animations):
                 ctx.error('reference-pose', '{}: no node translation, rotation or scale channel'.format(
                     animation.name))
     for name in sorted(set(flagged) - found):
-        ctx.warning('reference pose action "{}" was not exported as an animation'.format(name))
+        ctx.warning('reference pose "{}" was not exported as an animation (use export_animation_mode ACTIONS, '
+                    'or NLA_TRACKS with the action as the only strip of a track)'.format(name))
     ordered = sorted(animations, key=lambda a: (pose_label(a) is not None,
                                                 POSE_ORDER.get(pose_label(a), 3) if pose_label(a) else 0))
     animations[:] = ordered
@@ -105,10 +124,15 @@ def validate(ctx, gltf_root):
     def resolve(ref, table):
         return table[ref] if isinstance(ref, int) else ref
 
+    seen = {}
     for animation in ctx.animations:
         label = pose_label(animation)
         if label is None:
             continue
+        if label in seen:
+            ctx.error('reference-pose', 'poseType {} is exported twice ({} and {}); consumers use the first'.format(
+                label, seen[label], animation.name))
+        seen.setdefault(label, animation.name)
         if not label:
             ctx.error('reference-pose', '{}: empty poseType'.format(animation.name))
         for channel in animation.channels:

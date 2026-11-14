@@ -76,7 +76,9 @@ def humanoid_mapping(ob):
 
 
 class KHR_OT_make_t_pose(bpy.types.Operator):
-    """Create a one-frame t_pose reference-pose action from the rest pose (limb_dir convention)"""
+    """Create a one-frame t_pose reference-pose action from the rest pose (limbs only: torso, head, shoulders
+    and feet keep the rest pose; limb_dir convention in the rig's own frame). Replaces this armature's
+    previous t_pose action"""
     bl_idname = 'khr_character.make_t_pose'
     bl_label = 'Make T-Pose'
     bl_options = {'REGISTER', 'UNDO'}
@@ -99,7 +101,10 @@ class KHR_OT_make_t_pose(bpy.types.Operator):
         mode = ob.mode
         if mode != 'POSE':
             bpy.ops.object.mode_set(mode='POSE')
-        action = make_t_pose(ob, mapping, self.action_name, include_thumb=self.include_thumb)
+        report = []
+        action = make_t_pose(ob, mapping, self.action_name, include_thumb=self.include_thumb, report=report)
+        for line in report:
+            self.report({'WARNING'}, line)
         if mode != 'POSE':
             bpy.ops.object.mode_set(mode=mode)
         self.report({'INFO'}, 'Created reference pose action ' + action.name)
@@ -124,7 +129,11 @@ class KHR_OT_capture_reference_pose(bpy.types.Operator):
     def execute(self, context):
         from .tpose import key_reference_pose
         ob = context.active_object
-        action = key_reference_pose(ob, self.action_name or self.pose_type, self.pose_type, self.from_rest)
+        report = []
+        action = key_reference_pose(ob, self.action_name or self.pose_type, self.pose_type, self.from_rest,
+                                    report=report)
+        for line in report:
+            self.report({'WARNING'}, line)
         self.report({'INFO'}, 'Created reference pose action ' + action.name)
         return {'FINISHED'}
 
