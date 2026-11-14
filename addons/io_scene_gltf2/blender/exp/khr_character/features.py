@@ -17,8 +17,9 @@
 # mesh(ctx, mesh, blender_mesh, obj, materials), gltf(ctx, scenes, animations), root(ctx, gltf)
 # and validate(ctx, gltf).
 
-from . import checks
+from . import checks, marker
 
 FEATURES = [
+    marker,
     checks,
 ]
