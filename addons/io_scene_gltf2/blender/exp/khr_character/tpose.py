@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Make T-pose (limb_dir convention) for an armature with a vrm1_humanoid mapping.
+# Make T-pose (limb_dir convention, character frame from the rig) for an armature with a vrm1_humanoid mapping.
 
 import bpy
 
@@ -28,21 +28,68 @@ ARM_ORDER = ['UpperArm', 'LowerArm', 'Hand', 'ThumbMetacarpal', 'ThumbProximal',
     f + s for f in ('Index', 'Middle', 'Ring', 'Little') for s in ('Proximal', 'Intermediate', 'Distal')]
 
 
-def make_t_pose(ob, mapping, action_name, include_thumb=True):
-    """Pose ob into a T-pose from its rest pose and key it as a one-frame reference-pose action.
+SPINE_CHAIN = ('hips', 'spine', 'chest', 'upperChest', 'neck', 'head')
+LEAN_LIMIT_DEG = 20.0
 
-    Limb direction of a role = head of its mapped child role - its own head (limb_dir); a role without a
-    mapped child uses the head of its only child bone (e.g. an unmapped fingertip), and a bone without
-    children its bone direction. Arms and fingers are aligned with +X (left) / -X (right), the thumb 45 degrees
-    between that axis and the character's front (-Y), legs with -Z. Assumes the armature object
-    faces -Y with +Z up. Returns the new action.
+
+def character_frame(ob, mapping, report=None):
+    """(up, left, forward) unit vectors in armature space, from the rig itself: up = head - hips, left =
+    leftUpperLeg - rightUpperLeg (else the upper arms, else the shoulders) made orthogonal to up, forward =
+    left x up. Missing roles fall back to the object's world frame (+Z up, +X left). Problems (a mapped left
+    side that the feet place on the character's right, a leaning rest spine or neck) go to report."""
+    import math
+    from mathutils import Vector
+    report = report if report is not None else []
+    to_arm = ob.matrix_world.to_3x3().inverted()
+    head = {r: ob.pose.bones[b].head.copy() for r, b in mapping.items() if b in ob.pose.bones}
+    world_up = (to_arm @ Vector((0.0, 0.0, 1.0))).normalized()
+    up = head['head'] - head['hips'] if 'head' in head and 'hips' in head else world_up.copy()
+    if up.length < 1e-9:
+        up = world_up.copy()
+    up.normalize()
+    for a, b in (('leftUpperLeg', 'rightUpperLeg'), ('leftUpperArm', 'rightUpperArm'),
+                 ('leftShoulder', 'rightShoulder')):
+        if a in head and b in head and (head[a] - head[b]).length > 1e-9:
+            lr = head[a] - head[b]
+            break
+    else:
+        lr = to_arm @ Vector((1.0, 0.0, 0.0))
+    left = (lr - up * lr.dot(up)).normalized()
+    forward = left.cross(up)
+    toes = [head[s + 'Toes'] - head[s + 'Foot'] for s in ('left', 'right') if s + 'Toes' in head and s + 'Foot' in head]
+    if toes and sum(toes, Vector()).dot(forward) < 0.0:
+        report.append('the mapped left side is on the character\'s right (the toes point backwards in the '
+                      'frame derived from the mapping); check the left/right roles')
+    if math.degrees(up.angle(world_up)) > LEAN_LIMIT_DEG:
+        report.append('the rig is not upright in world space (hips to head {:.0f} degrees from world up); the '
+                      'T-pose uses the rig\'s own up'.format(math.degrees(up.angle(world_up))))
+    chain = [r for r in SPINE_CHAIN if r in head]
+    for a, b in zip(chain, chain[1:]):
+        d = head[b] - head[a]
+        if d.length > 1e-9 and math.degrees(d.angle(up)) > LEAN_LIMIT_DEG:
+            report.append('rest {} -> {} leans {:.0f} degrees from the character\'s up; the T-pose keeps the torso, '
+                          'head, shoulders and feet at rest'.format(a, b, math.degrees(d.angle(up))))
+    return up, left, forward
+
+
+def make_t_pose(ob, mapping, action_name, include_thumb=True, report=None):
+    """Pose the limbs of ob into a T-pose from its rest pose and key it as a one-frame reference-pose action.
+
+    Limbs only: torso, head, shoulders and feet keep the rest pose. Limb direction of a role (limb_dir) =
+    head of its mapped child role - its own head; a role without a mapped child uses the head of its only
+    child bone (e.g. an unmapped fingertip), or with several children the child whose head lies most nearly
+    along the parent-to-bone direction, and a bone without children its bone direction. Targets are in the
+    character frame derived from the rig (character_frame): arms and fingers along left / -left, thumbs 45
+    degrees between that axis and forward, upper and lower legs along -up. Warnings go to report. Returns
+    the new action (an earlier t_pose action of this armature is superseded, see key_reference_pose).
     """
-    from mathutils import Matrix, Vector
+    from mathutils import Matrix
 
     bpy.context.view_layer.objects.active = ob
     for pb in ob.pose.bones:
         pb.matrix_basis = Matrix.Identity(4)
     bpy.context.view_layer.update()
+    up, left, forward = character_frame(ob, mapping, report)
 
     def limb_dir(role):
         pb = ob.pose.bones[mapping[role]]
@@ -50,15 +97,19 @@ def make_t_pose(ob, mapping, action_name, include_thumb=True):
         base = role[len(side):]
         child = ARM_CHAINS.get(base) if base in ARM_CHAINS else LEG_CHAINS.get(base)
         if child and side + child in mapping:
-            d = ob.pose.bones[mapping[side + child]].head - pb.head
-        elif base == 'Hand' and side + 'IndexProximal' in mapping:
-            d = ob.pose.bones[mapping[side + 'IndexProximal']].head - pb.head
-        elif len(pb.children) == 1:
+            return ob.pose.bones[mapping[side + child]].head - pb.head
+        if base == 'Hand' and side + 'IndexProximal' in mapping:
+            return ob.pose.bones[mapping[side + 'IndexProximal']].head - pb.head
+        if len(pb.children) == 1:
             # unmapped tip bone (e.g. a fingertip): its head, since the bone axis need not follow the limb
-            d = pb.children[0].head - pb.head
-        else:
-            d = pb.tail - pb.head
-        return d
+            return pb.children[0].head - pb.head
+        if pb.children and pb.parent is not None and (pb.head - pb.parent.head).length > 1e-9:
+            along = (pb.head - pb.parent.head).normalized()
+            kids = [c for c in pb.children if (c.head - pb.head).length > 1e-9]
+            if kids:
+                best = max(kids, key=lambda c: (c.head - pb.head).normalized().dot(along))
+                return best.head - pb.head
+        return pb.tail - pb.head
 
     def align(role, target):
         if role not in mapping:
@@ -77,21 +128,51 @@ def make_t_pose(ob, mapping, action_name, include_thumb=True):
             if base.startswith('Thumb'):
                 if not include_thumb:
                     continue
-                target = Vector((sx, -1.0, 0.0))
+                target = left * sx + forward
             else:
-                target = Vector((sx, 0.0, 0.0))
+                target = left * sx
             align(side + base, target)
         for base in ('UpperLeg', 'LowerLeg'):
-            align(side + base, Vector((0.0, 0.0, -1.0)))
+            align(side + base, -up)
 
-    return key_reference_pose(ob, action_name, 't_pose', from_rest=False)
+    return key_reference_pose(ob, action_name, 't_pose', from_rest=False, report=report)
 
 
-def key_reference_pose(ob, action_name, pose_type, from_rest=True):
+def _action_bones(action):
+    """Pose-bone names animated by an action (layered or legacy)."""
+    import re
+    curves = []
+    if hasattr(action, 'layers'):
+        for layer in action.layers:
+            for strip in layer.strips:
+                for bag in strip.channelbags:
+                    curves.extend(bag.fcurves)
+    else:
+        curves = list(action.fcurves)
+    return {m.group(1) for fc in curves for m in [re.match(r'pose\.bones\["(.+?)"\]', fc.data_path)] if m}
+
+
+def pose_label(action):
+    rp = action.khr_reference_pose
+    return rp.custom_pose_type if rp.pose_type == 'CUSTOM' else rp.pose_type
+
+
+def key_reference_pose(ob, action_name, pose_type, from_rest=True, report=None):
     """Key every pose bone of ob at scene.frame_start into a new one-frame action flagged as a
-    reference pose of pose_type, then leave the armature in rest pose with its previous action."""
+    reference pose of pose_type, then leave the armature in rest pose with its previous action.
+
+    A flagged action of the same pose type that animates this armature's bones is superseded: unflagged,
+    renamed with '.superseded' and its fake user cleared, so a re-run replaces it."""
     from mathutils import Matrix
 
+    bones = set(ob.pose.bones.keys())
+    for old in list(bpy.data.actions):
+        if old.khr_reference_pose.is_reference and pose_label(old) == pose_type and _action_bones(old) & bones:
+            old.khr_reference_pose.is_reference = False
+            old.use_fake_user = False
+            old.name = old.name + '.superseded'
+            if report is not None:
+                report.append('superseded reference pose action ' + old.name)
     if from_rest:
         for pb in ob.pose.bones:
             pb.matrix_basis = Matrix.Identity(4)
