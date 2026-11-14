@@ -123,15 +123,17 @@ def validate(ctx, gltf_root):
     def resolve(ref, table):
         return table[ref] if isinstance(ref, int) else ref
 
-    seen = {}
+    seen = {}  # label -> [(animation name, targeted nodes)]
     for animation in ctx.animations:
         label = pose_label(animation)
         if label is None:
             continue
-        if label in seen:
-            ctx.error('reference-pose', 'poseType {} is exported twice ({} and {}); consumers use the first'.format(
-                label, seen[label], animation.name))
-        seen.setdefault(label, animation.name)
+        nodes = {c.target.node for c in animation.channels}
+        for other, other_nodes in seen.get(label, []):
+            if nodes & other_nodes:  # the same skeleton; separate rigs may each have their own
+                ctx.error('reference-pose', 'poseType {} is exported twice for one skeleton ({} and {}); consumers '
+                          'use the first'.format(label, other, animation.name))
+        seen.setdefault(label, []).append((animation.name, nodes))
         if not label:
             ctx.error('reference-pose', '{}: empty poseType'.format(animation.name))
         for channel in animation.channels:
