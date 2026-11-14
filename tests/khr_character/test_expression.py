@@ -83,6 +83,11 @@ class MorphExpressions(unittest.TestCase):
         anim = g.animation('blink')
         self.assertEqual(self.weights(g, anim, 'Face'), ([0, 0.25], [0, 0.75]))
 
+    def test_weights_outside_unit_range_are_not_clamped(self):
+        add_expression('jawPress', ('jawOpen', -0.054), ('smile', 1.25))
+        g = u.Glb(u.export('expr_unclamped', export_khr_character=True))
+        self.assertEqual(self.weights(g, g.animation('jawPress'), 'Face'), ([0, 0, 0], [-0.054, 1.25, 0]))
+
     def test_object_filter(self):
         add_expression('jawFaceOnly', ('jawOpen', 1.0, self.face))
         g = u.Glb(u.export('expr_filter', export_khr_character=True))
