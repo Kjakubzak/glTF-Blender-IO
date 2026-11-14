@@ -283,6 +283,187 @@ def draw_suppressions(layout, expression):
     layout.operator(KHR_OT_suppression_add.bl_idname, icon='ADD')
 
 
+def _set_square_render(scene, size=1024):
+    scene.render.resolution_x = scene.render.resolution_y = size
+    scene.render.pixel_aspect_x = scene.render.pixel_aspect_y = 1.0
+    scene.render.resolution_percentage = 100
+
+
+def _scene_bounds(context):
+    from mathutils import Vector
+    lo, hi = Vector((1e9, 1e9, 1e9)), Vector((-1e9, -1e9, -1e9))
+    found = False
+    for ob in context.scene.objects:
+        if ob.type != 'MESH':
+            continue
+        for corner in ob.bound_box:
+            p = ob.matrix_world @ Vector(corner)
+            lo = Vector(map(min, lo, p))
+            hi = Vector(map(max, hi, p))
+            found = True
+    if not found:
+        lo, hi = Vector((-0.5, -0.5, 0.0)), Vector((0.5, 0.5, 1.8))
+    return lo, hi
+
+
+class KHR_OT_add_default_camera_hints(bpy.types.Operator):
+    """Add full_body and portrait hint cameras in front of the scene's meshes (character facing -Y) and set a
+    square render resolution (S40)"""
+    bl_idname = 'khr_character.add_default_camera_hints'
+    bl_label = 'Add Default Camera Hints'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    size: bpy.props.IntProperty(name='Resolution', default=1024, min=16)
+
+    def execute(self, context):
+        import math
+        from mathutils import Vector
+        scene = context.scene
+        lo, hi = _scene_bounds(context)
+        height = hi.z - lo.z
+        center = (lo + hi) / 2
+        lens, sensor = 50.0, 24.0
+        half_fov = math.atan(sensor / 2 / lens)
+        made = []
+        shots = (('full_body', height * 1.1, center.z), ('portrait', height * 0.3, hi.z - height * 0.12))
+        for role, frame_h, aim_z in shots:
+            data = bpy.data.cameras.new('khr_' + role)
+            data.lens, data.sensor_height, data.sensor_fit = lens, sensor, 'VERTICAL'
+            ob = bpy.data.objects.new('khr_' + role, data)
+            scene.collection.objects.link(ob)
+            distance = frame_h / 2 / math.tan(half_fov)
+            ob.location = Vector((center.x, lo.y - distance, aim_z))
+            ob.rotation_euler = (math.pi / 2, 0.0, 0.0)  # looks along +Y at the character's front
+            hint = ob.khr_hints.camera
+            hint.enabled, hint.role, hint.source_aspect = True, role, 1.0
+            made.append(ob.name)
+        _set_square_render(scene, self.size)
+        self.report({'INFO'}, 'Added ' + ', '.join(made))
+        return {'FINISHED'}
+
+
+class KHR_OT_add_lookat_target(bpy.types.Operator):
+    """Add a look-at target empty between the mapped eyes (else at the head), parented to the head bone"""
+    bl_idname = 'khr_character.add_lookat_target'
+    bl_label = 'Add Look-at Target'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and context.active_object.type == 'ARMATURE'
+
+    def execute(self, context):
+        arm = context.active_object
+        mapping = humanoid_mapping(arm)
+        if 'head' not in mapping:
+            self.report({'ERROR'}, 'vrm1_humanoid mapping lacks head')
+            return {'CANCELLED'}
+        bones = arm.data.bones
+        if 'leftEye' in mapping and 'rightEye' in mapping:
+            local = (bones[mapping['leftEye']].head_local + bones[mapping['rightEye']].head_local) / 2
+        else:
+            local = bones[mapping['head']].head_local.copy()
+        ob = bpy.data.objects.new('khr_lookat_target', None)
+        context.scene.collection.objects.link(ob)
+        ob.empty_display_size = 0.02
+        world = arm.matrix_world @ local
+        ob.parent, ob.parent_type, ob.parent_bone = arm, 'BONE', mapping['head']
+        context.view_layer.update()
+        ob.matrix_world.translation = world
+        ob.khr_hints.lookat.enabled = True
+        return {'FINISHED'}
+
+
+class KHR_OT_hints_from_cameras(bpy.types.Operator):
+    """Turn the selected cameras into hint cameras: the role is the camera name when it is a standard role
+    (else default_view), perspective cameras use vertical sensor fit, and every hint gets one source aspect
+    that also becomes the render aspect (S40)"""
+    bl_idname = 'khr_character.hints_from_cameras'
+    bl_label = 'Hints from Cameras'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    aspect: bpy.props.FloatProperty(name='Aspect (w/h)', default=1.0, min=0.1, max=10.0)
+    height: bpy.props.IntProperty(name='Resolution Height', default=1024, min=16)
+
+    def execute(self, context):
+        from .hints import STANDARD_CAMERA_ROLES
+        cameras = [ob for ob in context.selected_objects if ob.type == 'CAMERA']
+        if not cameras:
+            self.report({'ERROR'}, 'Select one or more cameras')
+            return {'CANCELLED'}
+        for ob in cameras:
+            hint = ob.khr_hints.camera
+            hint.enabled = True
+            base = ob.name.split('.')[0]
+            hint.role = base if base in STANDARD_CAMERA_ROLES else (hint.role or 'default_view')
+            if ob.data.type == 'PERSP':
+                ob.data.sensor_fit = 'VERTICAL'
+            else:
+                ob.data.sensor_fit = 'AUTO'
+            hint.source_aspect = self.aspect
+        r = context.scene.render
+        r.resolution_y = self.height
+        r.resolution_x = int(round(self.height * self.aspect))
+        r.pixel_aspect_x = r.pixel_aspect_y = 1.0
+        r.resolution_percentage = 100
+        self.report({'INFO'}, 'Render resolution {}x{}'.format(r.resolution_x, r.resolution_y))
+        return {'FINISHED'}
+
+
+class KHR_PT_object_hints(bpy.types.Panel):
+    bl_label = 'KHR_character Hints'
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'object'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        ob = context.object
+        if ob is None:
+            return
+        h = ob.khr_hints
+        if ob.type == 'CAMERA':
+            layout.prop(h.camera, 'enabled')
+            if h.camera.enabled:
+                layout.prop(h.camera, 'role')
+                layout.prop(h.camera, 'target')
+                if h.camera.target is not None and h.camera.target.type == 'ARMATURE':
+                    layout.prop_search(h.camera, 'target_bone', h.camera.target.data, 'bones')
+                for p in ('label', 'keep_core_camera', 'source_aspect'):
+                    layout.prop(h.camera, p)
+        layout.prop(h.lookat, 'enabled')
+        if h.lookat.enabled:
+            layout.prop(h.lookat, 'hint')
+        layout.prop(h.visibility, 'enabled')
+        if h.visibility.enabled:
+            layout.prop(h.visibility, 'roles')
+            layout.prop(h.visibility, 'label')
+        row = layout.row(align=True)
+        row.operator(KHR_OT_add_default_camera_hints.bl_idname)
+        row.operator(KHR_OT_hints_from_cameras.bl_idname)
+        layout.operator(KHR_OT_add_lookat_target.bl_idname)
+
+
+class KHR_PT_material_hint(bpy.types.Panel):
+    bl_label = 'KHR_character Visibility Hint'
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'material'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.material is not None
+
+    def draw(self, context):
+        hint = context.material.khr_primitive_hint
+        self.layout.prop(hint, 'enabled')
+        if hint.enabled:
+            self.layout.prop(hint, 'roles')
+            self.layout.prop(hint, 'label')
+
+
 class KHR_PT_skeleton_mapping(bpy.types.Panel):
     bl_label = 'KHR_character Skeleton Mapping'
     bl_space_type = 'PROPERTIES'
@@ -470,6 +651,11 @@ classes = (
     KHR_OT_suggest_vrm1_mapping,
     KHR_PT_expression_mapping,
     KHR_PT_skeleton_mapping,
+    KHR_OT_add_default_camera_hints,
+    KHR_OT_add_lookat_target,
+    KHR_OT_hints_from_cameras,
+    KHR_PT_object_hints,
+    KHR_PT_material_hint,
 )
 
 

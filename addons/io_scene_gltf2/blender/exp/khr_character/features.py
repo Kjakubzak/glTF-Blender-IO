@@ -17,7 +17,7 @@
 # mesh(ctx, mesh, blender_mesh, obj, materials), gltf(ctx, scenes, animations), root(ctx, gltf)
 # and validate(ctx, gltf).
 
-from . import checks, expression, mapping, marker, reference_pose, skeleton_mapping
+from . import checks, expression, hints, mapping, marker, reference_pose, skeleton_mapping
 
 FEATURES = [
     marker,
@@ -25,5 +25,6 @@ FEATURES = [
     expression,
     mapping,
     reference_pose,
+    hints,
     checks,
 ]
