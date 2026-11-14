@@ -27,7 +27,13 @@ BLACK_LIST = [
     'gltf2_KHR_materials_variants_variants',
     'gltf2_active_variant',
     'gltf2_variant_default_materials',
-    'gltf2_variant_mesh_data']
+    'gltf2_variant_mesh_data',
+    # KHR_character authoring data (blender/com/khr_character)
+    'khr_character',
+    'khr_skeleton_mapping',
+    'khr_reference_pose',
+    'khr_hints',
+    'khr_primitive_hint']
 
 
 def generate_extras(blender_element):
