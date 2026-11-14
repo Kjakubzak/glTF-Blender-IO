@@ -41,6 +41,15 @@ class AutoMap(unittest.TestCase):
                 self.assertEqual(problems, [])
                 self.assertEqual(mapping, expected)
 
+    def test_shoulder_named_upper_arm_without_clavicle(self):
+        bones, expected = rigs.clavicle_chain()
+        bones = [(n, 'chest' if p and p.startswith('clavicle') else p, h) for n, p, h in bones
+                 if not n.startswith('clavicle')]
+        mapping, problems = automap.auto_map(bones)
+        self.assertEqual(problems, [])
+        self.assertEqual(mapping['leftUpperArm'], 'shoulder_l')
+        self.assertNotIn('leftShoulder', mapping)
+
     def test_all_or_nothing(self):
         bones, _ = rigs.mixamo()
         bones = [b for b in bones if 'LeftFoot' not in b[0] and 'LeftToe' not in b[0]]
