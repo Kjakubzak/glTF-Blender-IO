@@ -324,12 +324,13 @@ describe('Exporter', function () {
                 assert.match(asset.asset.generator, /^Khronos glTF Blender I\/O v[0-9.]+\+khr_character\.[0-9a-f]{12}\.bl[0-9.]+$/);
             });
 
-            it('maps vrm1_humanoid roles for four skeleton conventions', function () {
+            it('maps vrm1_humanoid roles for five skeleton conventions', function () {
                 const expected = {
                     rigify: { hips: 'DEF-spine', spine: 'DEF-spine.001', head: 'DEF-spine.006', leftUpperArm: 'DEF-upper_arm.L', rightHand: 'DEF-hand.R', leftLowerLeg: 'DEF-shin.L', leftIndexDistal: 'DEF-f_index.03.L' },
                     mixamo: { hips: 'mixamorig:Hips', upperChest: 'mixamorig:Spine2', head: 'mixamorig:Head', leftUpperArm: 'mixamorig:LeftArm', rightLowerLeg: 'mixamorig:RightLeg', leftLittleDistal: 'mixamorig:LeftHandPinky3' },
                     maya_jnt: { hips: 'Hips_jnt', chest: 'Spine2_jnt', leftShoulder: 'L_Clavicle_jnt', leftLowerArm: 'L_Elbow_jnt', rightFoot: 'R_Ankle_jnt' },
                     cartoon3finger: { hips: 'pelvis', chest: 'chest', leftUpperArm: 'arm_upper.l', rightThumbDistal: 'thumb_02.r', leftMiddleProximal: 'middle_01.l' },
+                    clavicle_chain: { leftShoulder: 'clavicle_l', leftUpperArm: 'shoulder_l', rightLowerArm: 'elbow_r', rightHand: 'wrist_r', leftLittleDistal: 'finger_c_03_l' },
                 };
                 const required = ['hips', 'spine', 'head', 'leftUpperLeg', 'leftLowerLeg', 'leftFoot', 'rightUpperLeg', 'rightLowerLeg', 'rightFoot',
                     'leftUpperArm', 'leftLowerArm', 'leftHand', 'rightUpperArm', 'rightLowerArm', 'rightHand'];

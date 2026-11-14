@@ -165,7 +165,34 @@ def cartoon3finger():
     return bones, expected
 
 
-RIGS = {'rigify': rigify, 'mixamo': mixamo, 'maya_jnt': maya_jnt, 'cartoon3finger': cartoon3finger}
+def clavicle_chain():
+    """clavicle -> shoulder -> elbow -> wrist naming ('shoulder' is the upper arm, the clavicle the shoulder),
+    a thumb and three lettered fingers (a, b, c -> index, middle, little)."""
+    def fmt(part, side, i):
+        names = {'shoulder': 'clavicle', 'upper_arm': 'shoulder', 'forearm': 'elbow', 'hand': 'wrist',
+                 'thigh': 'thigh', 'shin': 'knee', 'foot': 'ankle', 'toe': 'toe', 'thumb': 'thumb',
+                 'finger_a': 'finger_a', 'finger_b': 'finger_b', 'finger_c': 'finger_c'}
+        return '{}{}_{}'.format(names[part], '_{:02d}'.format(i) if i else '', side.lower())
+    spine = [('pelvis', None, (0, 0, 1.0)), ('spine_01', 'pelvis', (0, 0, 1.15)),
+             ('spine_02', 'spine_01', (0, 0, 1.3)), ('chest', 'spine_02', (0, 0, 1.4)),
+             ('neck', 'chest', (0, 0, 1.55)), ('head', 'neck', (0, 0, 1.65))]
+    bones = spine + _limbs(fmt, 'chest', 'pelvis', ('thumb', 'finger_a', 'finger_b', 'finger_c'), 3)
+    expected = {'hips': 'pelvis', 'spine': 'spine_01', 'chest': 'spine_02', 'upperChest': 'chest', 'neck': 'neck',
+                'head': 'head'}
+    for side, s in (('l', 'left'), ('r', 'right')):
+        expected.update({s + 'Shoulder': 'clavicle_' + side, s + 'UpperArm': 'shoulder_' + side,
+                         s + 'LowerArm': 'elbow_' + side, s + 'Hand': 'wrist_' + side,
+                         s + 'UpperLeg': 'thigh_' + side, s + 'LowerLeg': 'knee_' + side,
+                         s + 'Foot': 'ankle_' + side, s + 'Toes': 'toe_' + side})
+        for f, n in (('Thumb', 'thumb'), ('Index', 'finger_a'), ('Middle', 'finger_b'), ('Little', 'finger_c')):
+            segs = ('Metacarpal', 'Proximal', 'Distal') if f == 'Thumb' else ('Proximal', 'Intermediate', 'Distal')
+            for k, seg in enumerate(segs):
+                expected[s + f + seg] = '{}_{:02d}_{}'.format(n, k + 1, side)
+    return bones, expected
+
+
+RIGS = {'rigify': rigify, 'mixamo': mixamo, 'maya_jnt': maya_jnt, 'cartoon3finger': cartoon3finger,
+        'clavicle_chain': clavicle_chain}
 
 
 def build_armature(bones, name='Armature', tail_mode='child'):
