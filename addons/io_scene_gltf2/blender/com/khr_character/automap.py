@@ -15,7 +15,8 @@
 # Automatic vrm1_humanoid role mapping for an armature, without Blender dependencies.
 # Input: bones as (name, parent_name or None, head) in armature space (Blender: +Z up, character
 # front -Y, character left +X). Steps: name tokens (common conventions), topology for the spine
-# chain, neck and head, side from tokens or head x, finger segments by depth; then validation
+# chain, neck and head, upper arm vs clavicle, side from tokens or head x, lettered fingers by count,
+# finger segments by depth; then validation
 # (required roles, unique bones, ancestry order). The result is all-or-nothing.
 
 import json
@@ -32,6 +33,9 @@ PREFIXES = ('mixamorig', 'def-', 'def_', 'org-', 'bip001', 'bip01', 'j_bip_', 'c
 SUFFIXES = ('_jnt', '_joint', '_bn', '_def', '_skin')
 FINGERS = {'thumb': 'Thumb', 'index': 'Index', 'middle': 'Middle', 'ring': 'Ring', 'pinky': 'Little',
            'little': 'Little'}
+# Lettered fingers ("finger" + a/b/c/d, thumb named separately), by count, from the thumb side outwards
+LETTERED_FINGERS = {1: ['Index'], 2: ['Index', 'Little'], 3: ['Index', 'Middle', 'Little'],
+                    4: ['Index', 'Middle', 'Ring', 'Little']}
 
 
 def vocabulary():
@@ -80,6 +84,9 @@ def classify(name):
     for key, finger in FINGERS.items():
         if key in w or joined.startswith('hand' + key) or joined.startswith(key):
             return 'finger:' + finger, side, seg
+    letters = [t for t in words if len(t) == 1 and t in 'abcd']
+    if 'finger' in w and len(letters) == 1:
+        return 'fingerletter:' + letters[0], side, seg
     if w & {'clavicle', 'shoulder', 'collar'}:
         return 'Shoulder', side, seg
     if 'forearm' in w or ('fore' in w and 'arm' in w) or ('lower' in w and 'arm' in w) or 'lowerarm' in w \
@@ -162,7 +169,7 @@ class Tree:
 def auto_map(bones):
     """Return (mapping {role: bone}, problems [str]). mapping is empty when any problem is found."""
     tree = Tree(bones)
-    cand = {}
+    cls = {}
     for n in tree.order:
         base, side, seg = classify(n)
         if base is None:
@@ -173,7 +180,27 @@ def auto_map(bones):
                 side = 'left' if x > 1e-6 else 'right' if x < -1e-6 else None
             if side is None:
                 continue
-        cand.setdefault((base, side), []).append((n, seg))
+        cls[n] = (base, side, seg)
+    # Chain topology beats names: a "shoulder"-named bone whose child is the elbow/forearm is the upper arm
+    # (clavicle -> shoulder -> elbow -> wrist), since a clavicle never parents the forearm directly.
+    for n, (base, side, seg) in list(cls.items()):
+        if base == 'Shoulder' and any(cls.get(c, (None,))[0] == 'LowerArm' for c in tree.children.get(n, [])):
+            cls[n] = ('UpperArm', side, seg)
+    for side in ('left', 'right'):
+        letters = sorted({b.split(':')[1] for b, sd, _s in cls.values()
+                          if b.startswith('fingerletter:') and sd == side})
+        named = {b for b, sd, _s in cls.values() if b.startswith('finger:') and sd == side}
+        fingers = LETTERED_FINGERS.get(len(letters), [])
+        for n, (base, sd, seg) in list(cls.items()):
+            if base.startswith('fingerletter:') and sd == side and fingers:
+                finger = fingers[letters.index(base.split(':')[1])]
+                if 'finger:' + finger not in named:
+                    cls[n] = ('finger:' + finger, side, seg)
+    cand = {}
+    for n in tree.order:
+        if n in cls and not cls[n][0].startswith('fingerletter:'):
+            base, side, seg = cls[n]
+            cand.setdefault((base, side), []).append((n, seg))
     m = {}
 
     def pick(base, side):
@@ -189,7 +216,7 @@ def auto_map(bones):
                 m[s + base] = b
     legs = [m.get('leftUpperLeg'), m.get('rightUpperLeg')]
     hips = pick('hips', None)
-    if hips is None or not all(l and hips in tree.ancestors(l) for l in legs):
+    if hips is None or not all(leg and hips in tree.ancestors(leg) for leg in legs):
         hips = tree.lca(legs)
     if hips:
         m['hips'] = hips
