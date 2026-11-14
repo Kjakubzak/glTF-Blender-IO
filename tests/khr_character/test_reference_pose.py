@@ -152,19 +152,62 @@ class MakeTPose(unittest.TestCase):
             d = pos[expected[side + 'ThumbDistal']] - pos[expected[side + 'ThumbProximal']]
             self.assertLess(u.angle_deg(d, (sx, 0, 1)), 0.01, side)
 
-    def test_rerun_supersedes_and_duplicates_abort(self):
+    def test_body_turned_in_armature_keeps_its_left_axis(self):
+        import math
+        t = math.radians(25.0)  # the whole body turned 25 degrees about the armature's up axis
+        ob, expected = transformed_rig(lambda h: (h[0] * math.cos(t) - h[1] * math.sin(t),
+                                                  h[0] * math.sin(t) + h[1] * math.cos(t), h[2]))
+        self.assertEqual(bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT'), {'FINISHED'})
+        g = u.Glb(u.export('refpose_turned', export_khr_character=True, export_animation_mode='ACTIONS'))
+        up, left, forward = self.check_frame_t_pose(g, expected)
+        self.assertLess(u.angle_deg(up, (0, 1, 0)), 0.01)
+        self.assertAlmostEqual(u.angle_deg(left, (1, 0, 0)), 25.0, places=2)
+
+    def test_rerun_replaces_and_duplicates_abort(self):
         ob, expected = a_pose_rig()
         bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
         bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
-        flagged = [a.name for a in bpy.data.actions if a.khr_reference_pose.is_reference]
-        self.assertEqual(flagged, ['t_pose'])
+        self.assertEqual([a.name for a in bpy.data.actions], ['t_pose'])
+        self.assertTrue(bpy.data.actions['t_pose'].khr_reference_pose.is_reference)
         g = u.Glb(u.export('refpose_rerun', export_khr_character=True, export_animation_mode='ACTIONS'))
-        self.assertEqual([a['name'] for a in g.json['animations']].count('t_pose'), 1)
-        old = [a for a in bpy.data.actions if a.name.endswith('.superseded')][0]
-        old.khr_reference_pose.is_reference = True
-        old.use_fake_user = True
+        self.assertEqual([a['name'] for a in g.json['animations']], ['t_pose'])
+        copy = bpy.data.actions['t_pose'].copy()
+        copy.use_fake_user = True
         with self.assertRaises(RuntimeError):
             u.export('refpose_duplicate', export_khr_character=True, export_animation_mode='ACTIONS')
+
+    def test_rerun_keeps_superseded_action_still_in_use(self):
+        ob, expected = a_pose_rig()
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        track = ob.animation_data.nla_tracks.new()
+        track.strips.new('t_pose', 1, bpy.data.actions['t_pose'])
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        old = bpy.data.actions['t_pose.superseded']
+        self.assertFalse(old.khr_reference_pose.is_reference)
+        self.assertEqual(track.strips[0].action, old)
+        self.assertEqual([a.name for a in bpy.data.actions if a.khr_reference_pose.is_reference], ['t_pose'])
+
+    def test_rerun_leaves_other_rigs_with_same_bone_names(self):
+        a, expected = a_pose_rig()
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        b, _ = a_pose_rig()
+        self.assertEqual(set(a.pose.bones.keys()), set(b.pose.bones.keys()))
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        mine = {act.khr_reference_pose.armature.name: act for act in bpy.data.actions
+                if act.khr_reference_pose.is_reference}
+        self.assertEqual(sorted(mine), [a.name, b.name])
+        self.assertEqual(mine[a.name].name, 't_pose')
+        self.assertTrue(mine[a.name].use_fake_user)
+        self.assertEqual(len(bpy.data.actions), 2)
+        b.khr_skeleton_mapping.sets.clear()  # a file maps one skeleton; the second rig is a prop
+        for ob in (a, b):  # with several armatures the exporter takes only assigned or NLA actions
+            ob.animation_data.nla_tracks.new().strips.new('pose', 1, mine[ob.name])
+        g = u.Glb(u.export('refpose_two_rigs', export_khr_character=True, export_animation_mode='ACTIONS'))
+        poses = [anim for anim in g.json['animations'] if 'KHR_character_reference_pose' in anim.get('extensions', {})]
+        self.assertEqual(len(poses), 2)
+        targets = [{ch['target']['node'] for ch in anim['channels']} for anim in poses]
+        self.assertFalse(targets[0] & targets[1])
 
     def test_nla_tracks_mode(self):
         ob, expected = a_pose_rig()

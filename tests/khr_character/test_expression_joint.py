@@ -215,6 +215,30 @@ class Capture(unittest.TestCase):
         self.assertGreater(2 * np.degrees(np.arccos(min(1.0, abs(float(np.dot(q[0], q[-1])))))), 25.0)
         self.assertTrue(con.enabled)
 
+    def test_restored_when_the_export_raises(self):
+        from io_scene_gltf2.blender.exp.animation.sampled.armature import action_sampled
+        ob, face, _ = face_rig()
+        bpy.ops.khr_character.capture_expression('EXEC_DEFAULT', name='smile', source='CONTROL',
+                                                 control_path='["smile"]')
+        con = ob.pose.bones[P + 'Head'].constraints.new('LIMIT_ROTATION')
+        drivers = list(ob.animation_data.drivers) + list(face.data.shape_keys.animation_data.drivers)
+        real = action_sampled.gather_armature_sampled_channels
+        seen = []
+
+        def failing(*args, **kwargs):  # a core exporter failure while the expression is sampled
+            seen.append((any(d.mute for d in drivers), con.enabled))
+            raise ValueError('forced failure')
+
+        action_sampled.gather_armature_sampled_channels = failing
+        try:
+            with self.assertRaises(RuntimeError):
+                u.export('expr_raises', export_khr_character=True, export_animation_mode='ACTIONS')
+        finally:
+            action_sampled.gather_armature_sampled_channels = real
+        self.assertEqual(seen, [(True, False)])
+        self.assertFalse(any(d.mute for d in drivers))
+        self.assertTrue(con.enabled)
+
     def test_look_left_in_head_frame(self):
         eye_rig()
         self.assertEqual(bpy.ops.khr_character.capture_expression(

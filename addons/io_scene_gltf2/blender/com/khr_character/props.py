@@ -102,6 +102,8 @@ class KHR_CharacterReferencePose(bpy.types.PropertyGroup):
                                                      ('i_pose', 'I-Pose', ''), ('CUSTOM', 'Custom', '')),
                             default='t_pose')
     custom_pose_type: StringProperty(name='Custom Pose Type', description='Vendor-qualified label')
+    armature: PointerProperty(name='Armature', type=bpy.types.Object, poll=_is_armature,
+                              description='Armature this reference pose was made for (re-runs replace only its own)')
 
 
 class KHR_CharacterCameraHint(bpy.types.PropertyGroup):

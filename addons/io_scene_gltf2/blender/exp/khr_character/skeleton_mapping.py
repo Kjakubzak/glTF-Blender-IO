@@ -35,11 +35,11 @@ def tree_filter(ctx, vtree):
     for ob in bpy.data.objects:
         if ob.type == 'ARMATURE':
             for mapping_set in ob.khr_skeleton_mapping.sets:
-                mapped.update((ob.data.name, e.bone) for e in mapping_set.entries if e.bone)
+                mapped.update((ob.name, e.bone) for e in mapping_set.entries if e.bone)
     if not mapped:
         return
     for node in vtree.nodes.values():
-        bone = getattr(node, 'blender_bone', None)
+        bone = getattr(node, 'blender_bone', None)  # a PoseBone: id_data is the armature object
         if bone is not None and (bone.id_data.name, bone.name) in mapped and not node.keep_tag:
             node.keep_tag = True
             ctx.kept_bones = getattr(ctx, 'kept_bones', 0) + 1
