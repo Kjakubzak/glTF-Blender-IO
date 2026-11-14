@@ -176,6 +176,55 @@ class KHR_OT_capture_expression(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class KHR_OT_suggest_vrm1_mapping(bpy.types.Operator):
+    """Create (or replace) the vrm1_expressions mapping set from the scene's expression names"""
+    bl_idname = 'khr_character.suggest_vrm1_mapping'
+    bl_label = 'Suggest vrm1_expressions Mapping'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from ...com.khr_character.expression_names import suggest_vrm1
+        sc = context.scene.khr_character
+        suggestion = suggest_vrm1([e.name for e in sc.expressions])
+        if not suggestion:
+            self.report({'WARNING'}, 'No expression matches a vrm1_expressions input')
+            return {'CANCELLED'}
+        target = next((s for s in sc.mapping_sets if s.set_id == 'vrm1_expressions'), None)
+        if target is None:
+            target = sc.mapping_sets.add()
+            target.set_id = 'vrm1_expressions'
+        target.entries.clear()
+        for name, sources in suggestion.items():
+            entry = target.entries.add()
+            entry.name = name
+            for expression, weight in sources:
+                src = entry.sources.add()
+                src.expression = expression
+                src.weight = weight
+        self.report({'INFO'}, 'Mapped {} vrm1_expressions inputs'.format(len(suggestion)))
+        return {'FINISHED'}
+
+
+class KHR_PT_expression_mapping(bpy.types.Panel):
+    bl_label = 'KHR_character Expression Mapping'
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'scene'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        sc = context.scene.khr_character
+        layout.operator(KHR_OT_suggest_vrm1_mapping.bl_idname)
+        for s in sc.mapping_sets:
+            box = layout.box()
+            box.prop(s, 'set_id')
+            for entry in s.entries:
+                row = box.row()
+                row.label(text=entry.name)
+                row.label(text=', '.join('{} x{:.2f}'.format(x.expression, x.weight) for x in entry.sources))
+
+
 class KHR_PT_skeleton_mapping(bpy.types.Panel):
     bl_label = 'KHR_character Skeleton Mapping'
     bl_space_type = 'PROPERTIES'
@@ -357,6 +406,8 @@ classes = (
     KHR_OT_expression_key_remove,
     KHR_OT_suggest_arkit_expressions,
     KHR_PT_expressions,
+    KHR_OT_suggest_vrm1_mapping,
+    KHR_PT_expression_mapping,
     KHR_PT_skeleton_mapping,
 )
 
