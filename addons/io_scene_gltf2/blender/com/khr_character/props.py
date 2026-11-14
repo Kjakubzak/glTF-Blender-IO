@@ -26,7 +26,8 @@ def _is_armature(_self, obj):
 
 class KHR_CharacterShapeKeyWeight(bpy.types.PropertyGroup):
     key_name: StringProperty(name='Shape Key', description='Shape key name, matched on every exported mesh')
-    weight: FloatProperty(name='Weight', default=1.0, min=0.0, max=1.0)
+    # no hard limits: morph weights are unbounded in glTF and KHR_character_expression forbids clamping
+    weight: FloatProperty(name='Weight', default=1.0, soft_min=-1.0, soft_max=1.0)
     object: PointerProperty(name='Object', type=bpy.types.Object,
                             description='Restrict to this mesh object (empty: every mesh with the shape key)')
 
