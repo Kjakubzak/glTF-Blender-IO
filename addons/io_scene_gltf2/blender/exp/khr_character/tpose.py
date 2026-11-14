@@ -30,7 +30,8 @@ ARM_ORDER = ['UpperArm', 'LowerArm', 'Hand', 'ThumbMetacarpal', 'ThumbProximal',
 
 SPINE_CHAIN = ('hips', 'spine', 'chest', 'upperChest', 'neck', 'head')
 LEAN_LIMIT_DEG = 20.0
-SNAP_LIMIT_DEG = 30.0
+SNAP_LIMIT_DEG = 30.0  # up: posture lean is a few degrees
+LEFT_SNAP_LIMIT_DEG = 5.0  # left is not affected by lean; a larger offset is a body turned in its armature
 
 
 def _snap(v, exclude=None):
@@ -52,9 +53,10 @@ def _snap(v, exclude=None):
 def character_frame(ob, mapping, report=None):
     """(up, left, forward) unit vectors in armature space, from the rig itself: up = head - hips, left =
     leftUpperLeg - rightUpperLeg (else the upper arms, else the shoulders) made orthogonal to up, forward =
-    left x up. Missing roles fall back to the object's world frame (+Z up, +X left). up and then left are
-    snapped to the nearest principal axis of the armature (so a rest posture lean does not tilt the targets,
-    and a -Y/+Z rig gets exactly +/-X and -Z); a direction more than 30 degrees from every axis stays
+    left x up. Missing roles fall back to the object's world frame (+Z up, +X left). up is snapped to the
+    nearest principal axis of the armature within 30 degrees (so a rest posture lean does not tilt the
+    targets, and a -Y/+Z rig gets exactly +/-X and -Z), and left to the nearest remaining axis within 5
+    degrees (a body turned inside its armature keeps its own left-right axis); otherwise they stay
     unsnapped, with a warning. Problems (a mapped left side that the feet place on the character's right,
     a leaning rest spine or neck) go to report."""
     import math
@@ -85,11 +87,11 @@ def character_frame(ob, mapping, report=None):
     left = (lr - up * lr.dot(up)).normalized()
     if snapped:
         axis, off = _snap(left, exclude=up)
-        if off <= SNAP_LIMIT_DEG:
+        if off <= LEFT_SNAP_LIMIT_DEG:
             left = axis
         else:
-            report.append('the left-right axis is {:.0f} degrees from every armature axis; the T-pose uses it '
-                          'unsnapped'.format(off))
+            report.append('the body is turned {:.0f} degrees inside its armature; the arms follow the body\'s own '
+                          'left-right axis'.format(off))
     forward = left.cross(up)
     toes = [head[s + 'Toes'] - head[s + 'Foot'] for s in ('left', 'right') if s + 'Toes' in head and s + 'Foot' in head]
     if toes and sum(toes, Vector()).dot(forward) < 0.0:
@@ -173,18 +175,13 @@ def make_t_pose(ob, mapping, action_name, include_thumb=True, report=None):
     return key_reference_pose(ob, action_name, 't_pose', from_rest=False, report=report)
 
 
-def _action_bones(action):
-    """Pose-bone names animated by an action (layered or legacy)."""
-    import re
-    curves = []
-    if hasattr(action, 'layers'):
-        for layer in action.layers:
-            for strip in layer.strips:
-                for bag in strip.channelbags:
-                    curves.extend(bag.fcurves)
-    else:
-        curves = list(action.fcurves)
-    return {m.group(1) for fc in curves for m in [re.match(r'pose\.bones\["(.+?)"\]', fc.data_path)] if m}
+def _bound_to(action, ob):
+    """Whether a reference-pose action was made for armature object ob."""
+    owner = action.khr_reference_pose.armature
+    if owner is not None:
+        return owner == ob
+    slots = getattr(action, 'slots', [])
+    return any(slot.target_id_type == 'OBJECT' and slot.name_display == ob.name for slot in slots)
 
 
 def pose_label(action):
@@ -196,18 +193,26 @@ def key_reference_pose(ob, action_name, pose_type, from_rest=True, report=None):
     """Key every pose bone of ob at scene.frame_start into a new one-frame action flagged as a
     reference pose of pose_type, then leave the armature in rest pose with its previous action.
 
-    A flagged action of the same pose type that animates this armature's bones is superseded: unflagged,
-    renamed with '.superseded' and its fake user cleared, so a re-run replaces it."""
+    A flagged action of the same pose type made for this armature object (khr_reference_pose.armature, or
+    for older actions an object slot named after it) is replaced: removed when nothing else uses it,
+    otherwise unflagged and renamed with '.superseded'. Other rigs' actions are never touched."""
     from mathutils import Matrix
 
-    bones = set(ob.pose.bones.keys())
     for old in list(bpy.data.actions):
-        if old.khr_reference_pose.is_reference and pose_label(old) == pose_type and _action_bones(old) & bones:
-            old.khr_reference_pose.is_reference = False
-            old.use_fake_user = False
+        rp = old.khr_reference_pose
+        if not (rp.is_reference and pose_label(old) == pose_type and _bound_to(old, ob)):
+            continue
+        rp.is_reference = False
+        old.use_fake_user = False
+        if old.users == 0:
+            name = old.name
+            bpy.data.actions.remove(old)
+            message = 'replaced reference pose action ' + name
+        else:  # still used (e.g. by an NLA strip): keep it, unflagged
             old.name = old.name + '.superseded'
-            if report is not None:
-                report.append('superseded reference pose action ' + old.name)
+            message = 'superseded reference pose action {} (still in use, kept unflagged)'.format(old.name)
+        if report is not None:
+            report.append(message)
     if from_rest:
         for pb in ob.pose.bones:
             pb.matrix_basis = Matrix.Identity(4)
@@ -222,6 +227,7 @@ def key_reference_pose(ob, action_name, pose_type, from_rest=True, report=None):
         for path in ('location', rotation.get(pb.rotation_mode, 'rotation_euler'), 'scale'):
             pb.keyframe_insert(path, frame=frame)
     action.khr_reference_pose.is_reference = True
+    action.khr_reference_pose.armature = ob
     if pose_type in ('t_pose', 'a_pose', 'i_pose'):
         action.khr_reference_pose.pose_type = pose_type
     else:
