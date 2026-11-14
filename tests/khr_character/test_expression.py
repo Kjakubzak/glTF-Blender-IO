@@ -88,6 +88,27 @@ class MorphExpressions(unittest.TestCase):
         g = u.Glb(u.export('expr_unclamped', export_khr_character=True))
         self.assertEqual(self.weights(g, g.animation('jawPress'), 'Face'), ([0, 0, 0], [-0.054, 1.25, 0]))
 
+    def test_initial_weights_ignore_last_exported_track(self):
+        # the last NLA track ends at jawOpen = 0.7; the expression's t = 0 must stay the authored initial 0
+        keys = self.face.data.shape_keys
+        ad = keys.animation_data_create()
+        track_action = bpy.data.actions.new('talk')
+        ad.action = track_action
+        k = keys.key_blocks['jawOpen']
+        for frame, v in ((1, 0.0), (10, 0.7)):
+            k.value = v
+            k.keyframe_insert('value', frame=frame)
+        ad.action = None
+        track = ad.nla_tracks.new()
+        track.name = 'talk'
+        track.strips.new('talk', 1, track_action)
+        k.value = 0.0
+        bpy.context.scene.frame_set(1)
+        add_expression('jawOpen', ('jawOpen', 1.0))
+        g = u.Glb(u.export('expr_after_track', export_khr_character=True, export_animation_mode='NLA_TRACKS'))
+        self.assertIn('talk', [a['name'] for a in g.json['animations']])
+        self.assertEqual(self.weights(g, g.animation('jawOpen'), 'Face'), ([0, 0, 0], [1, 0, 0]))
+
     def test_object_filter(self):
         add_expression('jawFaceOnly', ('jawOpen', 1.0, self.face))
         g = u.Glb(u.export('expr_filter', export_khr_character=True))
