@@ -16,9 +16,10 @@
 # node.camera into the hint's advisory camera unless keep_core_camera is set), KHR_node_lookat_target
 # (may be {}), KHR_node_visibility_hint on objects and KHR_mesh_primitive_visibility_hint on the
 # primitives of materials with a hint. Hints are never listed in extensionsRequired.
-# S40: every hint camera with a source aspect must match the scene's render aspect (1e-3), and all hint
-# cameras of one export must share one source aspect; checked in pre_export so that strict mode aborts
-# before anything is written.
+# S40: every exported hint camera with a source aspect must match the render aspect of the scene it is
+# exported in (1e-3), and all exported hint cameras must share one source aspect. Checked while the nodes
+# are gathered (so selection, visibility, collection filters and every exported scene are respected);
+# strict mode aborts in gather_gltf_extensions_hook, before anything is written.
 
 import re
 
@@ -47,25 +48,23 @@ def _roles(text):
 
 
 def pre_export(ctx):
-    scene = bpy.context.scene
     ctx.pending_targets = []
-    aspects = {}
-    for ob in scene.objects:
-        hint = ob.khr_hints.camera
-        if ob.type == 'CAMERA' and hint.enabled and hint.source_aspect > 0.0:
-            aspects[ob.name] = hint.source_aspect
-    if not aspects:
+    ctx.hint_aspects = []
+
+
+def _check_aspect(ctx, ob):
+    """S40 for one exported hint camera, against the scene being gathered (the exporter makes each exported
+    scene current in turn); only cameras that are actually exported get here."""
+    aspect = ob.khr_hints.camera.source_aspect
+    if aspect <= 0.0:
         return
+    scene = bpy.context.scene
     render = render_aspect(scene)
-    values = sorted(set(round(a, 6) for a in aspects.values()))
-    if values[-1] - values[0] > ASPECT_TOLERANCE:
-        ctx.error('hint-aspect', 'hint cameras have mixed source aspects: {}'.format(
-            ', '.join('{} {:.4g}'.format(n, a) for n, a in sorted(aspects.items()))))
-    for name, aspect in sorted(aspects.items()):
-        if abs(aspect - render) > ASPECT_TOLERANCE:
-            ctx.error('hint-aspect', 'hint camera {} has source aspect {:.4g} but the render aspect is {:.4g} '
-                      '({}x{}); set the scene resolution to the hint aspect'.format(
-                          name, aspect, render, scene.render.resolution_x, scene.render.resolution_y))
+    ctx.hint_aspects.append((ob.name, aspect))
+    if abs(aspect - render) > ASPECT_TOLERANCE:
+        ctx.error('hint-aspect', 'hint camera {} has source aspect {:.4g} but scene {} renders at {:.4g} ({}x{}); '
+                  'set the scene resolution to the hint aspect'.format(
+                      ob.name, aspect, scene.name, render, scene.render.resolution_x, scene.render.resolution_y))
 
 
 def _set(node, name, data):
@@ -81,6 +80,7 @@ def node(ctx, node, ob):
         if ob.type != 'CAMERA':
             ctx.warning('{}: camera hint on a {} object is ignored'.format(ob.name, ob.type.lower()))
         else:
+            _check_aspect(ctx, ob)
             role = hints.camera.role.strip()
             if not role:
                 ctx.error('camera-hint', '{}: empty role'.format(ob.name))
@@ -131,6 +131,11 @@ def mesh(ctx, mesh, blender_mesh, ob, materials):
 
 
 def gltf(ctx, scenes, animations):
+    aspects = getattr(ctx, 'hint_aspects', [])
+    values = sorted(set(round(a, 6) for _n, a in aspects))
+    if values and values[-1] - values[0] > ASPECT_TOLERANCE:
+        ctx.error('hint-aspect', 'exported hint cameras have mixed source aspects: {}'.format(
+            ', '.join('{} {:.4g}'.format(n, a) for n, a in sorted(set(aspects)))))
     for camera_name, data, target, bone in getattr(ctx, 'pending_targets', []):
         if bone:
             node = ctx.bone_nodes.get((target, bone))

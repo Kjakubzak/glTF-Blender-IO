@@ -117,6 +117,46 @@ class Hints(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             u.export('hints_bone_missing', export_khr_character=True, export_cameras=True)
 
+    def test_aspect_rule_covers_every_exported_scene(self):
+        hint_scene()
+        other = bpy.data.scenes.new('Other')
+        other.render.resolution_x, other.render.resolution_y = 1920, 1080
+        data = bpy.data.cameras.new('wide')
+        cam = bpy.data.objects.new('wide', data)
+        other.collection.objects.link(cam)
+        cam.khr_hints.camera.enabled, cam.khr_hints.camera.role = True, 'full_body'
+        cam.khr_hints.camera.source_aspect = 1.0
+        try:
+            with self.assertRaises(RuntimeError):
+                u.export('hints_two_scenes', export_khr_character=True, export_cameras=True)
+            g = u.Glb(u.export('hints_active_scene', export_khr_character=True, export_cameras=True,
+                               use_active_scene=True))
+            self.assertNotIn('wide', [n.get('name') for n in g.json['nodes']])
+        finally:
+            bpy.data.objects.remove(cam)
+            bpy.data.scenes.remove(other)
+
+    def test_aspect_rule_ignores_unexported_cameras(self):
+        hint_scene(resolution=(1920, 1080), source_aspect=1.0)
+        for ob in bpy.context.scene.objects:
+            ob.select_set(ob.name == 'Body')
+        g = u.Glb(u.export('hints_selection', export_khr_character=True, export_cameras=True, use_selection=True))
+        self.assertEqual([n.get('name') for n in g.json['nodes']], ['Body'])
+
+    def test_full_collection_hierarchy(self):
+        cams = hint_scene()
+        coll = bpy.data.collections.new('Cameras')
+        bpy.context.scene.collection.children.link(coll)
+        for ob in cams.values():
+            for c in list(ob.users_collection):
+                c.objects.unlink(ob)
+            coll.objects.link(ob)
+        g = u.Glb(u.export('hints_collections', export_khr_character=True, export_cameras=True,
+                           export_hierarchy_full_collections=True))
+        node = g.json['nodes'][g.node_index('portrait')]
+        self.assertEqual(node['extensions'][CAM]['role'], 'portrait')
+        bpy.data.collections.remove(coll)
+
     def test_keep_core_camera(self):
         cams = hint_scene()
         cams['full_body'].khr_hints.camera.keep_core_camera = True
