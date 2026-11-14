@@ -104,6 +104,19 @@ class Hints(unittest.TestCase):
         self.assertEqual(j['materials'][hinted[0]['material']]['name'], 'Hair')
         self.assertEqual(hinted[0]['extensions'][PRIM], {'roles': ['third_person'], 'label': 'Hair'})
 
+    def test_bone_target(self):
+        import rigs
+        cams = hint_scene()
+        ob = rigs.build_armature(rigs.clavicle_chain()[0], name='Rig')
+        hint = cams['portrait'].khr_hints.camera
+        hint.target, hint.target_bone = ob, 'head'
+        g = u.Glb(u.export('hints_bone', export_khr_character=True, export_cameras=True))
+        node = g.json['nodes'][g.node_index('portrait')]
+        self.assertEqual(node['extensions'][CAM]['targetNode'], g.node_index('head'))
+        hint.target_bone = 'no_such_bone'
+        with self.assertRaises(RuntimeError):
+            u.export('hints_bone_missing', export_khr_character=True, export_cameras=True)
+
     def test_keep_core_camera(self):
         cams = hint_scene()
         cams['full_body'].khr_hints.camera.keep_core_camera = True

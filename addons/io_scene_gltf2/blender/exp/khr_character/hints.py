@@ -95,7 +95,9 @@ def node(ctx, node, ob):
                 data['label'] = hints.camera.label
             _set(node, khr.CAMERA_HINT, data)
             if hints.camera.target is not None:
-                ctx.pending_targets.append((ob.name, data, hints.camera.target.name))
+                target = hints.camera.target
+                bone = hints.camera.target_bone if target.type == 'ARMATURE' else ''
+                ctx.pending_targets.append((ob.name, data, target.name, bone))
     if hints.lookat.enabled:
         _set(node, khr.LOOKAT_TARGET, {'hint': hints.lookat.hint} if hints.lookat.hint else {})
     if hints.visibility.enabled:
@@ -129,8 +131,14 @@ def mesh(ctx, mesh, blender_mesh, ob, materials):
 
 
 def gltf(ctx, scenes, animations):
-    for camera_name, data, target in getattr(ctx, 'pending_targets', []):
-        if target == camera_name:
+    for camera_name, data, target, bone in getattr(ctx, 'pending_targets', []):
+        if bone:
+            node = ctx.bone_nodes.get((target, bone))
+            if node is None:
+                ctx.error('camera-hint', '{}: target bone {}/{} is not exported'.format(camera_name, target, bone))
+            else:
+                data['targetNode'] = node
+        elif target == camera_name:
             ctx.error('camera-hint', '{}: targetNode must be a different node'.format(camera_name))
         elif target in ctx.object_nodes:
             data['targetNode'] = ctx.object_nodes[target]

@@ -417,7 +417,11 @@ class KHR_PT_object_hints(bpy.types.Panel):
         if ob.type == 'CAMERA':
             layout.prop(h.camera, 'enabled')
             if h.camera.enabled:
-                for p in ('role', 'target', 'label', 'keep_core_camera', 'source_aspect'):
+                layout.prop(h.camera, 'role')
+                layout.prop(h.camera, 'target')
+                if h.camera.target is not None and h.camera.target.type == 'ARMATURE':
+                    layout.prop_search(h.camera, 'target_bone', h.camera.target.data, 'bones')
+                for p in ('label', 'keep_core_camera', 'source_aspect'):
                     layout.prop(h.camera, p)
         layout.prop(h.lookat, 'enabled')
         if h.lookat.enabled:

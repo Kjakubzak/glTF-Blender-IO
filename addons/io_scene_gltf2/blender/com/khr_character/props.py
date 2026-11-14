@@ -108,6 +108,8 @@ class KHR_CharacterCameraHint(bpy.types.PropertyGroup):
     enabled: BoolProperty(name='Camera Hint', default=False)
     role: StringProperty(name='Role', default='default_view')
     target: PointerProperty(name='Target', type=bpy.types.Object)
+    target_bone: StringProperty(name='Target Bone',
+                                description='Bone of the target armature whose joint node is the subject point')
     label: StringProperty(name='Label')
     keep_core_camera: BoolProperty(name='Keep Core Camera', default=False,
                                    description='Also keep the camera on the node (node.camera)')
