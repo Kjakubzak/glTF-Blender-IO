@@ -31,8 +31,9 @@ ARM_ORDER = ['UpperArm', 'LowerArm', 'Hand', 'ThumbMetacarpal', 'ThumbProximal',
 def make_t_pose(ob, mapping, action_name, include_thumb=True):
     """Pose ob into a T-pose from its rest pose and key it as a one-frame reference-pose action.
 
-    Limb direction of a role = head of its mapped child role - its own head (limb_dir); a leaf uses its
-    bone direction. Arms and fingers are aligned with +X (left) / -X (right), the thumb 45 degrees
+    Limb direction of a role = head of its mapped child role - its own head (limb_dir); a role without a
+    mapped child uses the head of its only child bone (e.g. an unmapped fingertip), and a bone without
+    children its bone direction. Arms and fingers are aligned with +X (left) / -X (right), the thumb 45 degrees
     between that axis and the character's front (-Y), legs with -Z. Assumes the armature object
     faces -Y with +Z up. Returns the new action.
     """
@@ -52,6 +53,9 @@ def make_t_pose(ob, mapping, action_name, include_thumb=True):
             d = ob.pose.bones[mapping[side + child]].head - pb.head
         elif base == 'Hand' and side + 'IndexProximal' in mapping:
             d = ob.pose.bones[mapping[side + 'IndexProximal']].head - pb.head
+        elif len(pb.children) == 1:
+            # unmapped tip bone (e.g. a fingertip): its head, since the bone axis need not follow the limb
+            d = pb.children[0].head - pb.head
         else:
             d = pb.tail - pb.head
         return d

@@ -408,6 +408,8 @@ describe('Exporter', function () {
                     assert.ok(angle(t(m + side + 'Arm'), t(m + side + 'ForeArm'), [x, 0, 0]) < 2, side + ' upper arm');
                     assert.ok(angle(t(m + side + 'ForeArm'), t(m + side + 'Hand'), [x, 0, 0]) < 2, side + ' lower arm');
                     assert.ok(angle(t(m + side + 'HandIndex1'), t(m + side + 'HandIndex2'), [x, 0, 0]) < 3, side + ' index');
+                    assert.ok(angle(t(m + side + 'HandIndex3'), t(m + side + 'HandIndex4'), [x, 0, 0]) < 3, side + ' index tip');
+                    assert.ok(angle(t(m + side + 'HandPinky3'), t(m + side + 'HandPinky4'), [x, 0, 0]) < 3, side + ' little tip');
                     assert.ok(angle(t(m + side + 'HandThumb2'), t(m + side + 'HandThumb3'), [x, 0, 1]) < 3, side + ' thumb');
                     assert.ok(angle(t(m + side + 'UpLeg'), t(m + side + 'Leg'), [0, -1, 0]) < 2, side + ' upper leg');
                 }
