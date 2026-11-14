@@ -129,6 +129,9 @@ class KhrCharacterExportExtension:
             asset.generator, revision, '.'.join(str(v) for v in bpy.app.version))
 
     def gather_node_hook(self, node, blender_object, export_settings):
+        # Geometry Nodes instances pass None and "full collection hierarchy" passes Collections
+        if not isinstance(blender_object, bpy.types.Object):
+            return
         self.ctx.object_nodes[blender_object.name] = node
         self._run('node', node, blender_object)
 
