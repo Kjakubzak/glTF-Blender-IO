@@ -147,9 +147,26 @@ class KhrCharacterExportExtension:
                          export_settings):
         self._run('mesh', mesh, blender_mesh, blender_object, materials)
 
+    def pre_animation_switch_hook(self, blender_object, blender_action, slot, track_name, on_type,
+                                  export_settings):
+        self._run('animation_switch', blender_object, blender_action, slot, on_type)
+
+    def animation_channels_armature_sampled(self, channels, blender_object, blender_action, slot_identifier,
+                                            cache_key, export_settings):
+        self._run('armature_channels', channels, blender_object, blender_action)
+
+    def animation_switch_loop_hook(self, blender_object, post, export_settings):
+        if post:
+            self._run('restore')
+
     def gather_gltf_hook(self, active_scene_idx, scenes, animations, export_settings):
+        self._run('restore')
         self.ctx.animations = animations
         self._run('gltf', scenes, animations)
+
+    def post_export_hook(self, export_settings):
+        if self.ctx is not None:
+            self._run('restore')
 
     def gather_gltf_extensions_hook(self, gltf, export_settings):
         self.ctx.gltf = gltf
@@ -165,6 +182,7 @@ class KhrCharacterExportExtension:
     def _raise_if_errors(self, stage):
         if not self.ctx.errors:
             return
+        self._run('restore')
         errors, self.ctx.errors = self.ctx.errors, []
         text = 'KHR_character {} failed: {}'.format(stage, '; '.join(errors))
         if self.is_critical:

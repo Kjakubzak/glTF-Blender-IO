@@ -18,7 +18,7 @@
 # VARIANT joint: a mixamo-style skeleton with a "nod" action (head rotation; spine keyed but constant) used
 #   as an ACTION expression, plus a clip action.
 # VARIANT from_control: "Capture Expression" from a control property that drives the head and a shape key
-#   (0.2 at neutral); the drivers are removed after the capture, as on export copies.
+#   (0.2 at neutral); the drivers stay (the export mutes them while the expression is sampled).
 # VARIANT headframe: "Capture Expression" with look LEFT on eye joints whose bone axes do not follow
 #   the gaze.
 # The saved export settings enable the KHR_character package and export each action.
@@ -46,11 +46,9 @@ if variant == 'joint':
     t.key_rotation(ob, clip, {1: {t.P + 'Neck': (1, 0, 0, 0)}, 10: {t.P + 'Neck': (0.9659, 0, 0, 0.2588)}})
     t.add_action_expression('nod', nod)
 elif variant == 'from_control':
-    ob, face, _ = t.face_rig()
+    t.face_rig()
     assert bpy.ops.khr_character.capture_expression(
         'EXEC_DEFAULT', name='smile', source='CONTROL', control_path='["smile"]') == {'FINISHED'}
-    ob.pose.bones[t.P + 'Head'].driver_remove('rotation_euler', 0)
-    face.data.shape_keys.key_blocks['mouthSmileLeft'].driver_remove('value')
 else:
     t.eye_rig()
     assert bpy.ops.khr_character.capture_expression(
