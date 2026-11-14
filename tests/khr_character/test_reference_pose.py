@@ -85,6 +85,27 @@ class MakeTPose(unittest.TestCase):
         # the scene itself is left in rest pose
         self.assertTrue(all(pb.matrix_basis.is_identity for pb in ob.pose.bones))
 
+    def test_distal_uses_unmapped_tip_child(self):
+        # every tail is perpendicular to its limb; the 4th finger/thumb segments are unmapped tip bones
+        ob, expected = a_pose_rig()
+        tips = {b.parent.name: b.name for b in ob.data.bones if b.parent and not b.children
+                and b.parent.name in expected.values()}
+        bpy.ops.khr_character.make_t_pose('EXEC_DEFAULT')
+        g = u.Glb(u.export('refpose_tips', export_khr_character=True, export_animation_mode='ACTIONS'))
+        pos = u.world_positions(g, g.animation('t_pose'))
+        checked = 0
+        for side in ('left', 'right'):
+            hand = pos[expected[side + 'MiddleProximal']] - pos[expected[side + 'Hand']]
+            for finger in ('Index', 'Middle', 'Ring', 'Little'):
+                distal = expected[side + finger + 'Distal']
+                self.assertIn(distal, tips)
+                self.assertLess(u.angle_deg(pos[tips[distal]] - pos[distal], hand), 3.0, (side, finger))
+                checked += 1
+            thumb = expected[side + 'ThumbDistal']
+            want = pos[thumb] - pos[expected[side + 'ThumbProximal']]
+            self.assertLess(u.angle_deg(pos[tips[thumb]] - pos[thumb], want), 3.0, (side, 'thumb'))
+        self.assertEqual(checked, 8)
+
     def test_rigs_with_limb_axes(self):
         for name in ('rigify', 'maya_jnt', 'cartoon3finger'):
             with self.subTest(rig=name):
