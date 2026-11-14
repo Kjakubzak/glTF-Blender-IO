@@ -195,8 +195,12 @@ RIGS = {'rigify': rigify, 'mixamo': mixamo, 'maya_jnt': maya_jnt, 'cartoon3finge
         'clavicle_chain': clavicle_chain}
 
 
-def build_armature(bones, name='Armature'):
-    """Create an armature object from (name, parent, head) rows; each tail points at its first child."""
+def build_armature(bones, name='Armature', tail_mode='child'):
+    """Create an armature object from (name, parent, head) rows.
+
+    tail_mode 'child': each tail points at the first child; 'perpendicular': every tail is head + 5 cm
+    along +Y, so bone axes do not follow the limbs (as with a Maya-axis import).
+    """
     import bpy
     arm = bpy.data.armatures.new(name)
     ob = bpy.data.objects.new(name, arm)
@@ -213,6 +217,8 @@ def build_armature(bones, name='Armature'):
         b.head = h
         c = first_child.get(n)
         t = heads[c] if c else (h[0], h[1], h[2] + 0.05)
+        if tail_mode == 'perpendicular':
+            t = (h[0], h[1] + 0.05, h[2])
         if sum((a - b_) ** 2 for a, b_ in zip(t, h)) < 1e-8:
             t = (h[0], h[1], h[2] + 0.05)
         b.tail = t
@@ -221,3 +227,30 @@ def build_armature(bones, name='Armature'):
             arm.edit_bones[n].parent = arm.edit_bones[p]
     bpy.ops.object.mode_set(mode='OBJECT')
     return ob
+
+
+def descendants(bones, root):
+    kids = {}
+    for n, p, _h in bones:
+        kids.setdefault(p, []).append(n)
+    out, stack = [], [root]
+    while stack:
+        n = stack.pop()
+        out.append(n)
+        stack.extend(kids.get(n, []))
+    return out
+
+
+def a_pose(bones, expected, angle_deg=45.0):
+    """Rotate both arms (from the upper arm down) by angle_deg towards -Z about their upper-arm head."""
+    import math
+    heads = {n: h for n, _p, h in bones}
+    moved = {}
+    for side, sign in (('left', 1.0), ('right', -1.0)):
+        upper = expected[side + 'UpperArm']
+        cx, cy, cz = heads[upper]
+        t = math.radians(angle_deg) * sign
+        for n in descendants(bones, upper):
+            x, y, z = heads[n][0] - cx, heads[n][1] - cy, heads[n][2] - cz
+            moved[n] = (cx + x * math.cos(t) + z * math.sin(t), cy + y, cz - x * math.sin(t) + z * math.cos(t))
+    return [(n, p, moved.get(n, h)) for n, p, h in bones]
