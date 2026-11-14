@@ -15,7 +15,8 @@
 # I3: KHR_character_expression + KHR_character_expression_morphtarget (declarative shape-key expressions).
 # Each SHAPE_KEYS expression becomes a new two-key animation (t = 0 and t = 1 s). For every exported
 # mesh node whose shape keys include a listed key name, it holds one complete weights channel in
-# get_sk_exported order: the authored initial weights at t = 0 and those weights plus the listed
+# get_sk_exported order: the authored initial weights (node/mesh weights as exported, never the live
+# shape-key values after the animation pass) at t = 0 and those weights plus the listed
 # weights at t = 1. Expression animations are placed after the other animations and before the
 # reference poses.
 
@@ -42,6 +43,26 @@ def _scalar_accessor(values, ctx, bounds=False):
                            constants.DataType.Scalar, False, ctx.settings)
 
 
+def pre_export(ctx):
+    # Shape-key values before the core exporter samples animations: afterwards they hold whatever the last
+    # exported track or action left behind.
+    ctx.initial_key_values = {}
+    for ob in bpy.context.scene.objects:
+        if ob.type == 'MESH' and ob.data.shape_keys is not None:
+            for k in ob.data.shape_keys.key_blocks:
+                ctx.initial_key_values[(ob.name, k.name)] = float(k.value)
+
+
+def _initial_weights(ob, node, keys, ctx):
+    """Authored initial morph weights of a node: node.weights, else mesh.weights (both gathered before the
+    animation pass), else the shape-key values captured in pre_export."""
+    for weights in (node.weights, node.mesh.weights):
+        if weights is not None and len(weights) == len(keys):
+            return [float(v) for v in weights]
+    values = getattr(ctx, 'initial_key_values', {})
+    return [values.get((ob.name, k.name), 0.0) for k in keys]
+
+
 def _mesh_objects(ctx):
     """(object, node, exported shape keys) for every exported mesh node with morph targets."""
     out = []
@@ -63,7 +84,7 @@ def _morph_channels(expression, meshes, ctx):
     channels, samplers, matched = [], [], set()
     for ob, node, keys in meshes:
         names = [k.name for k in keys]
-        base = [float(k.value) for k in keys]
+        base = _initial_weights(ob, node, keys, ctx)
         peak = list(base)
         touched = False
         for w in expression.shape_key_weights:
@@ -74,9 +95,9 @@ def _morph_channels(expression, meshes, ctx):
                 peak[i] = base[i] + w.weight
                 touched = True
                 matched.add(w.key_name)
-                if keys[i].value != 0.0:
-                    ctx.warning('expression "{}": shape key "{}" on {} has value {:g} (not 0) at rest'.format(
-                        expression.name, w.key_name, ob.name, keys[i].value))
+                if base[i] != 0.0:
+                    ctx.warning('expression "{}": shape key "{}" on {} has initial weight {:g} (not 0)'.format(
+                        expression.name, w.key_name, ob.name, base[i]))
         if not touched:
             continue
         sampler = gltf2_io.AnimationSampler(
